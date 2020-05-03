@@ -52,6 +52,7 @@ import com.streamsets.datacollector.util.ContainerError;
 import com.streamsets.datacollector.util.LockCache;
 import com.streamsets.datacollector.util.PipelineException;
 import com.streamsets.datacollector.util.TestUtil;
+import com.streamsets.datacollector.util.credential.PipelineCredentialHandler;
 import com.streamsets.dc.execution.manager.standalone.ResourceManager;
 import com.streamsets.pipeline.api.Config;
 import com.streamsets.pipeline.api.ExecutionMode;
@@ -135,8 +136,16 @@ public class TestClusterRunner {
     conf = new Configuration();
     pipelineStateStore = new CachePipelineStateStore(new FilePipelineStateStore(runtimeInfo, conf), conf);
     attributes = new HashMap<>();
+    eventListenerManager = new EventListenerManager();
     stageLibraryTask = MockStages.createStageLibrary(emptyCL);
-    pipelineStoreTask = new FilePipelineStoreTask(runtimeInfo, stageLibraryTask, pipelineStateStore, new LockCache<String>());
+    pipelineStoreTask = new FilePipelineStoreTask(
+        runtimeInfo,
+        stageLibraryTask,
+        pipelineStateStore,
+        eventListenerManager,
+        new LockCache<String>(),
+        Mockito.mock(PipelineCredentialHandler.class)
+    );
     pipelineStoreTask.init();
     pipelineStoreTask.create("admin", NAME, "label","some desc", false, false, attributes);
    //Create an invalid pipeline
@@ -149,8 +158,14 @@ public class TestClusterRunner {
     mockPipelineConf.getConfiguration().add(new Config("shouldRetry", "true"));
     mockPipelineConf.getConfiguration().add(new Config("retryAttempts", "3"));
     mockPipelineConf.setUuid(pipelineConfiguration.getUuid());
-    pipelineStoreTask.save("user2", TestUtil.HIGHER_VERSION_PIPELINE, "0", "description"
-      , mockPipelineConf);
+    pipelineStoreTask.save(
+        "user2",
+        TestUtil.HIGHER_VERSION_PIPELINE,
+        "0",
+        "description",
+        mockPipelineConf,
+        false
+    );
 
     clusterHelper = new ClusterHelper(new MockSystemProcessFactory(), clusterProvider, tempDir, emptyCL, emptyCL, null);
 
@@ -236,7 +251,7 @@ public class TestClusterRunner {
     PipelineConfiguration pipelineConf = pipelineStoreTask.load(NAME, REV);
     PipelineConfiguration conf = MockStages.createPipelineConfigurationWithClusterOnlyStage(mode);
     conf.setUuid(pipelineConf.getUuid());
-    pipelineStoreTask.save("admin", NAME, REV, "", conf);
+    pipelineStoreTask.save("admin", NAME, REV, "", conf, false);
   }
 
   @Test
@@ -634,9 +649,16 @@ public class TestClusterRunner {
     Configuration configuration = new Configuration();
     configuration.set(ExecutorConstants.RUNNER_THREAD_POOL_SIZE_KEY, 1);
     ResourceManager resourceManager = new ResourceManager(configuration);
+    eventListenerManager.addStateEventListener(resourceManager);
 
-    PipelineStoreTask pipelineStoreTask = new FilePipelineStoreTask(runtimeInfo, stageLibraryTask, pipelineStateStore,
-      new LockCache<String>());
+    PipelineStoreTask pipelineStoreTask = new FilePipelineStoreTask(
+        runtimeInfo,
+        stageLibraryTask,
+        pipelineStateStore,
+        eventListenerManager,
+        new LockCache<String>(),
+        Mockito.mock(PipelineCredentialHandler.class)
+    );
     pipelineStoreTask.init();
     pipelineStoreTask.create("admin", "a", "label", "some desc", false, false, attributes);
     pipelineStateStore.saveState("admin", "a", "0", PipelineStatus.EDITED, null,
@@ -700,14 +722,12 @@ public class TestClusterRunner {
   }
 
   private ClusterRunner createClusterRunner() {
-    eventListenerManager = new EventListenerManager();
     return new ClusterRunner(NAME, "0", runtimeInfo, conf, pipelineStoreTask, pipelineStateStore,
       stageLibraryTask, executorService, clusterHelper, new ResourceManager(conf), eventListenerManager, "myToken",
       aclStoreTask);
   }
 
   private Runner createRunnerForRetryTest(PipelineStateStore pipelineStateStore) {
-    eventListenerManager = new EventListenerManager();
     pipelineStateStore.init();
     return new RetryRunner(NAME, "0", runtimeInfo, conf, pipelineStoreTask, pipelineStateStore,
         stageLibraryTask, executorService, clusterHelper, new ResourceManager(conf), eventListenerManager, "myToken");
@@ -715,15 +735,11 @@ public class TestClusterRunner {
 
 
   private Runner createClusterRunner(String name, PipelineStoreTask pipelineStoreTask, ResourceManager resourceManager) {
-    eventListenerManager = new EventListenerManager();
-    Runner runner = new ClusterRunner(name, "0", runtimeInfo, conf, pipelineStoreTask, pipelineStateStore,
+    return new ClusterRunner(name, "0", runtimeInfo, conf, pipelineStoreTask, pipelineStateStore,
       stageLibraryTask, executorService, clusterHelper, resourceManager, eventListenerManager, "myToken", aclStoreTask);
-    eventListenerManager.addStateEventListener(resourceManager);
-    return runner;
   }
 
   private Runner createClusterRunnerForUnsupportedPipeline() {
-    eventListenerManager = new EventListenerManager();
     return new AsyncRunner(
       new ClusterRunner(
         TestUtil.HIGHER_VERSION_PIPELINE,

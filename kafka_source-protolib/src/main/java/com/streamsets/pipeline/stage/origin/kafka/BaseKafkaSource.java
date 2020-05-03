@@ -32,6 +32,7 @@ import com.streamsets.pipeline.kafka.api.SdcKafkaValidationUtil;
 import com.streamsets.pipeline.kafka.api.SdcKafkaValidationUtilFactory;
 import com.streamsets.pipeline.lib.kafka.KafkaConstants;
 import com.streamsets.pipeline.lib.kafka.KafkaErrors;
+import com.streamsets.pipeline.lib.kafka.KafkaKerberosUtil;
 import com.streamsets.pipeline.lib.kafka.MessageKeyUtil;
 import com.streamsets.pipeline.lib.parser.DataParser;
 import com.streamsets.pipeline.lib.parser.DataParserException;
@@ -65,6 +66,7 @@ public abstract class BaseKafkaSource extends BaseSource implements OffsetCommit
   protected static final String CONSUMER_GROUP = "consumerGroup";
   protected static final String TOPIC = "topic";
   protected static final String BROKER_LIST = "metadataBrokerList";
+  private static String keytabFileName;
 
 
   public BaseKafkaSource(KafkaConfigBean conf) {
@@ -126,6 +128,16 @@ public abstract class BaseKafkaSource extends BaseSource implements OffsetCommit
         KAFKA_CONFIG_BEAN_PREFIX + BROKER_LIST,
         getContext()
     );
+
+    if (conf.provideKeytab && kafkaValidationUtil.isProvideKeytabAllowed(issues, getContext())) {
+      keytabFileName = KafkaKerberosUtil.saveUserKeytab(
+          conf.userKeytab.get(),
+          conf.userPrincipal,
+          conf.kafkaConsumerConfigs,
+          issues,
+          getContext()
+      );
+    }
 
     try {
       int partitionCount = kafkaValidationUtil.getPartitionCount(
@@ -313,5 +325,10 @@ public abstract class BaseKafkaSource extends BaseSource implements OffsetCommit
       }
     }
     return records;
+  }
+
+  @Override
+  public void destroy() {
+    KafkaKerberosUtil.deleteUserKeytabIfExists(keytabFileName, getContext());
   }
 }

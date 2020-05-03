@@ -65,4 +65,5 @@ public interface SdcKafkaValidationUtil {
   public void createTopicIfNotExists(String topic, Map<String, Object> kafkaClientConfigs, String metadataBrokerList)
       throws StageException;
 
+  public boolean isProvideKeytabAllowed(List<Stage.ConfigIssue> issues, Stage.Context context);
 }

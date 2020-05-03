@@ -112,6 +112,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Future;
 import java.util.function.Function;
@@ -317,7 +318,9 @@ public class TestRemoteEventHandler {
   }
 
   private static PipelineStartEventJson createStartEvent(String name, String rev, String user) {
-    return setBaseEventPropertiesAndReturn(new PipelineStartEventJson(), name, rev, user);
+    PipelineStartEventJson pipelineStartEventJson = setBaseEventPropertiesAndReturn(new PipelineStartEventJson(), name, rev, user);
+    pipelineStartEventJson.setGroups(Arrays.asList("all"));
+    return pipelineStartEventJson;
   }
 
   private static PipelineStopEventJson createStopEvent(String name, String rev, String user) {
@@ -601,7 +604,7 @@ public class TestRemoteEventHandler {
     }
 
     @Override
-    public void start(Runner.StartPipelineContext context, String name, String rev) throws PipelineException, StageException {
+    public void start(Runner.StartPipelineContext context, String name, String rev, Set<String> groups) throws PipelineException, StageException {
       startCalled++;
       if (errorInjection) {
         throw new PipelineException(ContainerError.CONTAINER_0001);
@@ -1352,7 +1355,8 @@ public class TestRemoteEventHandler {
         null,
         1000l,
         false,
-        null
+        null,
+        Arrays.asList("all")
     ), EventType.PREVIEW_PIPELINE);
 
     assertThat(result.isError(), equalTo(false));
@@ -1480,54 +1484,4 @@ public class TestRemoteEventHandler {
         );
   }
 
-  @Test
-  public void testSyncSenderSkipSinglePipelineStatus() throws Exception {
-    EventClient eventClient = Mockito.mock(EventClient.class);
-    RuntimeInfo runtimeInfo = Mockito.mock(RuntimeInfo.class);
-    RemoteDataCollector remoteDataCollector = Mockito.mock(RemoteDataCollector.class);
-    Configuration conf = new Configuration();
-    conf.set(RemoteEventHandlerTask.SHOULD_SEND_SYNC_EVENTS, true);
-    final RemoteEventHandlerTask remoteEventHandlerTask = new RemoteEventHandlerTask(remoteDataCollector,
-        new SafeScheduledExecutorService(1, "testSyncSender"),
-        new SafeScheduledExecutorService(1, "testSyncSender"),
-        Mockito.mock(StageLibraryTask.class),
-        Mockito.mock(RuntimeInfo.class),
-        conf
-    );
-    RemoteEventHandlerTask.SyncEventSender syncEventSender = remoteEventHandlerTask.new SyncEventSender(eventClient,
-        remoteDataCollector,
-        jsonDto,
-        60000,
-        runtimeInfo,
-        new SafeScheduledExecutorService(1, "testSyncSender"),
-        Stopwatch.createStarted(),
-        120000,
-        0
-    );
-    PipelineAndValidationStatus pipelineAndValidationStatus = new PipelineAndValidationStatus("",
-        "",
-        "",
-        -1,
-        false,
-        null,
-        null,
-        null,
-        false,
-        null,
-        null,
-        0
-    );
-    Mockito.when(remoteDataCollector.getRemotePipelinesWithChanges()).thenReturn(Collections.singletonList(
-        pipelineAndValidationStatus));
-    syncEventSender.call();
-    Mockito.verify(remoteDataCollector, Mockito.times(1)).getRemotePipelinesWithChanges();
-    Mockito.verify(eventClient, Mockito.times(0))
-        .sendSyncEvents(
-            Mockito.any(),
-            Mockito.anyMap(),
-            Mockito.anyMap(),
-            Mockito.any(),
-            Mockito.any(Long.class)
-        );
-  }
 }

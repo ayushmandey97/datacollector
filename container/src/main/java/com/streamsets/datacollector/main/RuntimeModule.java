@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableList;
 import com.streamsets.datacollector.execution.EventListenerManager;
 import com.streamsets.datacollector.http.WebServerTask;
 import com.streamsets.datacollector.metrics.MetricsModule;
+import com.streamsets.datacollector.security.usermgnt.UsersManager;
 import com.streamsets.datacollector.util.Configuration;
 import com.streamsets.pipeline.api.impl.Utils;
 import dagger.Module;
@@ -32,17 +33,23 @@ import java.io.File;
 import java.util.Collections;
 import java.util.List;
 
-@Module(library = true, injects = {
-    BuildInfo.class,
-    RuntimeInfo.class,
-    Configuration.class,
-    EventListenerManager.class,
-    UserGroupManager.class
-}, includes = MetricsModule.class)
+@Module(
+    library = true,
+    injects = {
+        BuildInfo.class,
+        RuntimeInfo.class,
+        Configuration.class,
+        EventListenerManager.class,
+        UsersManager.class,
+        UserGroupManager.class
+    },
+    includes = MetricsModule.class
+)
 public class RuntimeModule {
   private static final Logger LOG = LoggerFactory.getLogger(RuntimeModule.class);
   private static String productName = RuntimeInfo.SDC_PRODUCT;
   private static String propertyPrefix = RuntimeInfo.SDC_PRODUCT;
+  private static File baseDir = null;
 
   /**
    * Kept under SDC-12270 to avoid changing too many files
@@ -64,6 +71,10 @@ public class RuntimeModule {
     RuntimeModule.propertyPrefix = propertyPrefix;
   }
 
+  public static synchronized void setBaseDir(File baseDir) {
+    RuntimeModule.baseDir = baseDir;
+  }
+
   //TODO: add setProductName and make that available in RuntimeInfo when constructed
 
   @Provides @Singleton
@@ -73,7 +84,13 @@ public class RuntimeModule {
 
   @Provides @Singleton
   public RuntimeInfo provideRuntimeInfo(MetricRegistry metrics) {
-    RuntimeInfo info = new StandaloneRuntimeInfo(productName, propertyPrefix, metrics, stageLibraryClassLoaders);
+    RuntimeInfo info = new StandaloneRuntimeInfo(
+        productName,
+        propertyPrefix,
+        metrics,
+        stageLibraryClassLoaders,
+        baseDir
+    );
     info.init();
     return info;
   }
@@ -92,14 +109,19 @@ public class RuntimeModule {
   }
 
   @Provides @Singleton
-  public UserGroupManager provideUserGroupManager(Configuration configuration) {
+  public UsersManager provideUsersManager(RuntimeInfo runtimeInfo, Configuration configuration) {
+    return RuntimeModuleUtils.provideUsersManager(runtimeInfo, configuration);
+  }
+
+  @Provides @Singleton
+  public UserGroupManager provideUserGroupManager(Configuration configuration, UsersManager usersManager) {
     String loginModule = configuration.get(
         WebServerTask.HTTP_AUTHENTICATION_LOGIN_MODULE,
         WebServerTask.HTTP_AUTHENTICATION_LOGIN_MODULE_DEFAULT
     );
     switch (loginModule) {
       case WebServerTask.FILE:
-        return new FileUserGroupManager();
+        return new FileUserGroupManager(usersManager);
       case WebServerTask.LDAP:
         return new LdapUserGroupManager();
       default:

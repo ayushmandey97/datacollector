@@ -23,11 +23,11 @@
   <parent>
     <groupId>com.streamsets</groupId>
     <artifactId>streamsets-datacollector-root</artifactId>
-    <version>3.15.0-SNAPSHOT</version>
+    <version>3.16.0-SNAPSHOT</version>
     <relativePath>../root</relativePath>
   </parent>
   <artifactId>streamsets-datacollector-cluster-bootstrap-api</artifactId>
-  <version>3.15.0-SNAPSHOT</version>
+  <version>3.16.0-SNAPSHOT</version>
   <description>StreamSets Data Collector Cluster Bootstrap API</description>
   <name>StreamSets Data Collector Cluster Bootstrap API</name>
   <packaging>jar</packaging>
@@ -86,6 +86,12 @@
     <dependency>
       <groupId>org.apache.spark</groupId>
       <artifactId>spark-streaming_2.11</artifactId>
+      <version>${spark.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-sql_2.11</artifactId>
       <version>${spark.version}</version>
       <scope>provided</scope>
     </dependency>

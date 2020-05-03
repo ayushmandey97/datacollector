@@ -15,7 +15,9 @@
  */
 package com.streamsets.pipeline.lib.jdbc;
 
+import com.google.common.collect.ImmutableSet;
 import com.streamsets.pipeline.api.ConfigDef;
+import com.streamsets.pipeline.api.ErrorCode;
 import com.streamsets.pipeline.api.ListBeanModel;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
@@ -41,6 +43,8 @@ import java.util.Set;
 
 public class HikariPoolConfigBean {
   private static final Logger LOG = LoggerFactory.getLogger(HikariPoolConfigBean.class);
+
+  private static final String GENERIC_CONNECTION_STRING_TEMPLATE = "://%s:%d%s";
 
   private static final String CONF_DRIVERS_LOAD = "com.streamsets.pipeline.stage.jdbc.drivers.load";
 
@@ -77,6 +81,7 @@ public class HikariPoolConfigBean {
   private Properties additionalProperties = new Properties();
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.STRING,
       label = "JDBC Connection String",
@@ -86,6 +91,7 @@ public class HikariPoolConfigBean {
   public String connectionString = "";
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       defaultValue = "true",
@@ -93,9 +99,10 @@ public class HikariPoolConfigBean {
       displayPosition = 15,
       group = "JDBC"
   )
-  public boolean useCredentials;
+  public boolean useCredentials = true;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.CREDENTIAL,
       dependsOn = "useCredentials",
@@ -107,6 +114,7 @@ public class HikariPoolConfigBean {
   public CredentialValue username;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.CREDENTIAL,
       dependsOn = "useCredentials",
@@ -118,6 +126,7 @@ public class HikariPoolConfigBean {
   public CredentialValue password;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.MODEL,
       defaultValue = "[]",
@@ -130,6 +139,7 @@ public class HikariPoolConfigBean {
   public List<ConnectionPropertyBean> driverProperties = new ArrayList<>();
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.STRING,
       label = "JDBC Driver Class Name",
@@ -140,6 +150,7 @@ public class HikariPoolConfigBean {
   public String driverClassName = "";
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.TEXT,
       mode = ConfigDef.Mode.SQL,
@@ -151,6 +162,7 @@ public class HikariPoolConfigBean {
   public String connectionTestQuery = "";
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Maximum Pool Size",
@@ -163,6 +175,7 @@ public class HikariPoolConfigBean {
   public int maximumPoolSize = DEFAULT_MAX_POOL_SIZE;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Minimum Idle Connections",
@@ -176,6 +189,7 @@ public class HikariPoolConfigBean {
   public int minIdle = DEFAULT_MIN_IDLE;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Connection Timeout (Seconds)",
@@ -189,6 +203,7 @@ public class HikariPoolConfigBean {
   public int connectionTimeout = DEFAULT_CONNECTION_TIMEOUT;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Idle Timeout (Seconds)",
@@ -204,6 +219,7 @@ public class HikariPoolConfigBean {
   public int idleTimeout = DEFAULT_IDLE_TIMEOUT;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Max Connection Lifetime (Seconds)",
@@ -218,6 +234,7 @@ public class HikariPoolConfigBean {
   public int maxLifetime = DEFAULT_MAX_LIFETIME;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       label = "Auto Commit",
@@ -229,6 +246,7 @@ public class HikariPoolConfigBean {
   public boolean autoCommit = false;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       label = "Enforce Read-only Connection",
@@ -241,18 +259,20 @@ public class HikariPoolConfigBean {
   public boolean readOnly = true;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.TEXT,
       mode = ConfigDef.Mode.SQL,
       label = "Init Query",
       description = "SQL query that will be executed on all new connections when they are created, before they are" +
-        " added to connection pool.",
+          " added to the connection pool.",
       displayPosition = 80,
       group = "ADVANCED"
   )
   public String initialQuery = "";
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.MODEL,
       label = "Transaction Isolation",
@@ -263,7 +283,6 @@ public class HikariPoolConfigBean {
   )
   @ValueChooserModel(TransactionIsolationLevelChooserValues.class)
   public TransactionIsolationLevel transactionIsolation = TransactionIsolationLevel.DEFAULT;
-
 
   private static final String HIKARI_CONFIG_PREFIX = "hikariConfigBean.";
   private static final String DRIVER_CLASSNAME = HIKARI_CONFIG_PREFIX + "driverClassName";
@@ -390,14 +409,7 @@ public class HikariPoolConfigBean {
     }
 
     // 2) Explicitly attempting to load known drivers if the service loading fails again
-    LOG.debug("Loading known JDBC drivers");
-    for(DatabaseVendor vendor: DatabaseVendor.values()) {
-      if(vendor.getDrivers() != null) {
-        for (String driver : vendor.getDrivers()) {
-          ensureJdbcDriverIfNeeded(loadedDrivers, driver);
-        }
-      }
-    }
+    loadVendorDriver(loadedDrivers);
 
     // 3) User can explicitly configure to auto-load given drivers
     LOG.debug("Loading explicitly configured drivers");
@@ -407,7 +419,18 @@ public class HikariPoolConfigBean {
     }
   }
 
-  private void ensureJdbcDriverIfNeeded(Set<String> loadedDrivers, String driver) {
+  protected void loadVendorDriver(Set<String> loadedDrivers) {
+    LOG.debug("Loading known JDBC drivers");
+    for(DatabaseVendor vendor: DatabaseVendor.values()) {
+      if(vendor.getDrivers() != null) {
+        for (String driver : vendor.getDrivers()) {
+          ensureJdbcDriverIfNeeded(loadedDrivers, driver);
+        }
+      }
+    }
+  }
+
+  protected void ensureJdbcDriverIfNeeded(Set<String> loadedDrivers, String driver) {
     try {
       Class klass = Class.forName(driver);
 
@@ -450,6 +473,24 @@ public class HikariPoolConfigBean {
     }
   }
 
+  public String getConnectionStringTemplate() {
+    return getConnectionString().split("://")[0].concat(GENERIC_CONNECTION_STRING_TEMPLATE);
+  }
+
+  public Set<BasicConnectionString.Pattern> getPatterns() {
+    List<BasicConnectionString.Pattern> listOfPatterns = new ArrayList<>();
+
+    // As it is the generic JDBC we want to match any connection string
+
+    listOfPatterns.add(new BasicConnectionString.Pattern("((.)*)", 1, null, 0, 1, 0));
+
+    return ImmutableSet.copyOf(listOfPatterns);
+  }
+
+  public ErrorCode getNonBasicUrlErrorCode() {
+    return JdbcErrors.JDBC_500;
+  }
+
   public void setAutoCommit(boolean autoCommit) {
     this.autoCommit = autoCommit;
   }
@@ -464,5 +505,10 @@ public class HikariPoolConfigBean {
 
   public CredentialValue getPassword() {
     return password;
+  }
+
+  public void setConnectionString(String connectionString) {
+    // Do nothing, in this case since we are using the generic JDBC we don't want to change the original connection
+    // string, be careful this method should not be used in test but must be used in any new change.
   }
 }

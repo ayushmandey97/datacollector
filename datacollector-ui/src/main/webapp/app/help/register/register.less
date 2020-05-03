@@ -19,30 +19,21 @@
  */
 
 .register-modal-form {
+  .file-upload-mixin();
 
-  .btn-file {
-    position: relative;
-    overflow: hidden;
-
-    input[type=file] {
-      position: absolute;
-      top: 0;
-      right: 0;
-      min-width: 100%;
-      min-height: 100%;
-      font-size: 100px;
-      text-align: right;
-      filter: alpha(opacity=0);
-      opacity: 0;
-      outline: none;
-      background: white;
-      cursor: inherit;
-      display: block;
-    }
+  textarea {
+    resize: vertical;
   }
 
-  input[readonly] {
-    background-color: white !important;
-    cursor: text !important;
+  .loading-text {
+    display: inline-block;
+    color: gray;
+    padding: 6px 12px;
+    vertical-align: middle;
+  }
+
+  a {
+    // required by legal
+    text-decoration: underline;
   }
 }

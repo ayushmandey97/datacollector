@@ -26,6 +26,7 @@ public enum SparkClusterType implements Label {
   AZURE_HD_INSIGHT("Apache Spark for HDInsight"),
   DATABRICKS("Databricks"),
   EMR("EMR"),
+  DATAPROC("Dataproc"),
   YARN("Hadoop YARN"),
   KUBERNETES("Kubernetes Cluster (advanced users only)"),
   LOCAL("None (local)"),

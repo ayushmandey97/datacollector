@@ -22,7 +22,8 @@ angular.module('dataCollectorApp.common')
     admin: 'admin',
     creator: 'creator',
     manager: 'manager',
-    guest: 'guest'
+    guest: 'guest',
+    adminActivation: 'admin-activation'
   })
   .service('authService', function($rootScope, $q, $cookies, api, configuration) {
     var self = this;
@@ -153,5 +154,14 @@ angular.module('dataCollectorApp.common')
      */
     this.isUserAdmin = function() {
       return self.userInfo && self.userInfo.roles && self.userInfo.roles.indexOf('admin') !== -1;
+    };
+
+    /**
+     * Gets the numbers of days until expiration from the expiration date
+     * @param {number} expiration milliseconds since epoch
+     */
+    this.daysUntilProductExpiration = function(expirationTime) {
+      var currentTime = new Date().getTime();
+      return Math.floor(( expirationTime - currentTime ) / 86400000);
     };
   });

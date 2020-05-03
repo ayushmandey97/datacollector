@@ -54,6 +54,7 @@ import com.streamsets.datacollector.util.Configuration;
 import com.streamsets.datacollector.util.LockCache;
 import com.streamsets.datacollector.util.LockCacheModule;
 import com.streamsets.datacollector.util.PipelineException;
+import com.streamsets.datacollector.util.credential.PipelineCredentialHandler;
 import com.streamsets.pipeline.api.ExecutionMode;
 import com.streamsets.pipeline.lib.executor.SafeScheduledExecutorService;
 import dagger.Module;
@@ -157,6 +158,15 @@ public class TestStandalonePipelineManager {
       return runtimeInfo;
     }
 
+    @Provides
+    public PipelineCredentialHandler provideEncryptingPipelineCredentialsHandler(
+        StageLibraryTask stageLibraryTask,
+        CredentialStoresTask credentialStoresTask,
+        Configuration configuration
+    ) {
+      return PipelineCredentialHandler.getEncrypter(stageLibraryTask, credentialStoresTask, configuration);
+    }
+
     @Provides @Singleton
     public Configuration provideConfiguration() {
       Configuration configuration = new Configuration();
@@ -166,10 +176,21 @@ public class TestStandalonePipelineManager {
     }
 
     @Provides @Singleton
-    public PipelineStoreTask providePipelineStoreTask(RuntimeInfo runtimeInfo, StageLibraryTask stageLibraryTask,
-                                                      PipelineStateStore pipelineStateStore, LockCache<String> lockCache) {
-      FilePipelineStoreTask filePipelineStoreTask = new FilePipelineStoreTask(runtimeInfo, stageLibraryTask,
-        pipelineStateStore, lockCache);
+    public PipelineStoreTask providePipelineStoreTask(
+        RuntimeInfo runtimeInfo,
+        StageLibraryTask stageLibraryTask,
+        PipelineStateStore pipelineStateStore,
+        LockCache<String> lockCache,
+        PipelineCredentialHandler pipelineCredentialsHandler
+    ) {
+      FilePipelineStoreTask filePipelineStoreTask = new FilePipelineStoreTask(
+          runtimeInfo,
+          stageLibraryTask,
+          pipelineStateStore,
+          new EventListenerManager(),
+          lockCache,
+          pipelineCredentialsHandler
+      );
       filePipelineStoreTask.init();
       return filePipelineStoreTask;
     }
@@ -362,6 +383,20 @@ public class TestStandalonePipelineManager {
     pipelineStoreTask.create("user", "aaaa", "label","blah", false, false, new HashMap<String, Object>());
     Runner runner = pipelineManager.getRunner("aaaa", "0");
     assertNotNull(runner);
+  }
+
+  @Test
+  public void testGetPipelineStatesStateFileRemoved() throws Exception {
+    // create two pipeline info files
+    pipelineStoreTask.create("user", "aaaa", "label", "blah", false, false, new HashMap<String, Object>());
+    pipelineStoreTask.create("user", "bbbb", "label", "blah", false, false, new HashMap<String, Object>());
+
+    // delete state file for one of the pipelines
+    pipelineStateStore.delete("aaaa", "0");
+    List<PipelineState> pipelineStates = pipelineManager.getPipelines();
+    assertEquals(1, pipelineStates.size());
+    assertEquals("bbbb", pipelineStates.get(0).getPipelineId());
+    assertEquals("0", pipelineStates.get(0).getRev());
   }
 
   @Test

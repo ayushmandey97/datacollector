@@ -16,6 +16,7 @@
 package com.streamsets.datacollector.usagestats;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -38,9 +39,16 @@ public class TestStatsBean {
         new UsageTimer().setName("s1").setAccumulatedTime(1),
         new UsageTimer().setName("s2").setAccumulatedTime(2)
     ));
+    FirstPipelineUse preview1 = new FirstPipelineUse().setCreatedOn(1).setFirstUseOn(2);
+    FirstPipelineUse preview2 = new FirstPipelineUse().setCreatedOn(1);
+    as.setCreateToPreview(ImmutableMap.of("p1", preview1, "p2", preview2));
+    FirstPipelineUse run1 = new FirstPipelineUse().setCreatedOn(10).setFirstUseOn(20).setStageCount(30);
+    FirstPipelineUse run2 = new FirstPipelineUse().setCreatedOn(10);
+    as.setCreateToRun(ImmutableMap.of("r1", run1, "r2", run2));
 
-    StatsBean sb = new StatsBean(as);
+    StatsBean sb = new StatsBean("sdcid", as);
 
+    Assert.assertEquals("sdcid", sb.getSdcId());
     Assert.assertEquals("version", sb.getDataCollectorVersion());
     Assert.assertEquals(true, sb.isDpmEnabled());
     Assert.assertEquals(1, sb.getUpTime());
@@ -51,6 +59,12 @@ public class TestStatsBean {
     Assert.assertEquals(3, sb.getPipelineMilliseconds());
     Assert.assertEquals((Long) 1L, sb.getStageMilliseconds().get("s1"));
     Assert.assertEquals((Long) 2L, sb.getStageMilliseconds().get("s2"));
+    Assert.assertEquals(1, sb.getCreateToPreview().size());
+    Assert.assertEquals(1, sb.getCreateToRun().size());
+    Assert.assertEquals(preview1.getCreatedOn(), sb.getCreateToPreview().get(0).getCreatedOn());
+    Assert.assertEquals(preview1.getFirstUseOn(), sb.getCreateToPreview().get(0).getFirstUseOn());
+    Assert.assertEquals(run1.getCreatedOn(), sb.getCreateToRun().get(0).getCreatedOn());
+    Assert.assertEquals(run1.getFirstUseOn(), sb.getCreateToRun().get(0).getFirstUseOn());
   }
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 StreamSets Inc.
+ * Copyright 2020 StreamSets Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,6 @@ angular.module('dataCollectorApp')
     });
 
     $translateProvider.preferredLanguage('en');
-
     $translateProvider.useCookieStorage();
     $translateProvider.useSanitizeValueStrategy('sanitizeParameters');
 
@@ -63,7 +62,8 @@ angular.module('dataCollectorApp')
             window.location.reload();
           } else if ((rejection.status === 0 || rejection.status === -1 ||
               (rejection.data && (typeof rejection.data.indexOf === 'function') &&
-                rejection.data.indexOf('login.html') !== -1))
+                (rejection.data.indexOf('login.html') !== -1 ||
+                rejection.data.indexOf('resetPassword.html') !== -1)))
           )  {
             // check if the error is related to remote service
             if (rejection.config && rejection.config.headers && rejection.config.headers['X-SS-User-Auth-Token']) {
@@ -291,6 +291,18 @@ angular.module('dataCollectorApp')
       },
 
       /**
+       * Open the Change Password Modal Dialog
+       */
+      changePassword: function() {
+        $modal.open({
+          templateUrl: 'app/home/usersAndGroups/changePassword/changePassword.tpl.html',
+          controller: 'ChangePasswordModalInstanceController',
+          size: 'sm',
+          backdrop: 'static',
+        });
+      },
+
+      /**
        * Logout header link command handler
        */
       logout: function() {
@@ -344,6 +356,9 @@ angular.module('dataCollectorApp')
         });
       },
 
+      /**
+       * Opens the registration modal
+       */
       showRegistrationModal: function() {
         $modal.open({
           templateUrl: 'app/help/register/registerModal.tpl.html',
@@ -355,6 +370,15 @@ angular.module('dataCollectorApp')
               return $rootScope.common.activationInfo;
             }
           }
+        });
+      },
+
+      showRegistrationPermissionErrorModal: function() {
+        $modal.open({
+          templateUrl: 'app/help/register/registrationPermissionErrorModal.tpl.html',
+          controller: 'RegisterPermissionErrorModalController',
+          size: '',
+          backdrop: 'static'
         });
       },
 
@@ -449,7 +473,6 @@ angular.module('dataCollectorApp')
           });
         }
 
-
         api.pipelineAgent.deleteAlert(triggeredAlert.pipelineName, triggeredAlert.ruleDefinition.id)
           .then(function() {
 
@@ -522,7 +545,6 @@ angular.module('dataCollectorApp')
       }
     };
 
-
     api.admin.getServerTime().then(function(res) {
       if (res && res.data) {
         var serverTime = res.data.serverTime,
@@ -531,44 +553,9 @@ angular.module('dataCollectorApp')
       }
     });
 
-    api.admin.getBuildInfo().then(function(res) {
-      if (res && res.data) {
-        $timeout(
-          function() {
-            Analytics.set('sdcVersion', res.data.version);
-          },
-          1000
-        );
-      }
-    });
-
     api.admin.getRemoteServerInfo().then(function(res) {
       if (res && res.data) {
         $rootScope.common.remoteServerInfo.registrationStatus = res.data.registrationStatus;
-      }
-    });
-
-    api.activation.getActivation().then(function(res) {
-      if (res && res.data) {
-        var activationInfo = $rootScope.common.activationInfo = res.data;
-        if (activationInfo.enabled) {
-          var currentTime = new Date().getTime();
-          var expirationTime = activationInfo.info.expiration;
-          var difDays =  Math.floor(( expirationTime - currentTime ) / 86400000);
-          if (difDays < 0 ) {
-            $rootScope.common.infoList = [{
-              message: 'Activation key expired, you need to get a new one from StreamSets'
-            }];
-          } else if (difDays < 30) {
-            $rootScope.common.infoList = [{
-              message: 'Activation key expires in ' + difDays + '  days'
-            }];
-          } else if (!activationInfo.info.valid) {
-            $rootScope.common.infoList = [{
-              message: 'Activation key is not valid'
-            }];
-          }
-        }
       }
     });
 
@@ -582,8 +569,6 @@ angular.module('dataCollectorApp')
         $rootScope.isAuthorized = authService.isAuthorized;
         $rootScope.common.isUserAdmin = authService.isUserAdmin();
 
-
-
         $rootScope.common.authenticationType = configuration.getAuthenticationType();
         $rootScope.common.isDPMEnabled = configuration.isDPMEnabled();
         $rootScope.common.isACLEnabled = configuration.isACLEnabled();
@@ -594,7 +579,28 @@ angular.module('dataCollectorApp')
         $rootScope.common.headerTitle = configuration.getUIHeaderTitle();
         if(configuration.isAnalyticsEnabled()) {
           Analytics.createAnalyticsScriptTag();
+          configuration.createFullStoryScriptTag();
+          mixpanel.opt_in_tracking();
+        } else {
+          mixpanel.opt_out_tracking();
         }
+        api.admin.getSdcId().then(function(res) {
+          var SDC_ID = res.data.id;
+          var USER_ID = SDC_ID + $rootScope.common.userName;
+          mixpanel.identify(USER_ID);
+          mixpanel.people.set({
+            'userName': $rootScope.common.userName,
+            'UserID': USER_ID,
+            'sdcId': SDC_ID
+          });
+          mixpanel.register({
+            'userName': $rootScope.common.userName,
+            'sdcId': SDC_ID
+          });
+          setTimeout(function() {
+            mixpanel.track('Login Complete', {});
+          }, 500); // setTimeout to pick up extra super/register properties set later
+        });
 
         if ($rootScope.common.isDPMEnabled && $rootScope.common.userRoles.indexOf('disconnected-sso') !== -1) {
           $rootScope.common.disconnectedMode = true;
@@ -613,15 +619,72 @@ angular.module('dataCollectorApp')
           window.$rootScope = $rootScope;
         }
 
-        if ($rootScope.isAdmin) {
-          api.system.getStats()
-            .then(function (res) {
-              if (!res.data.opted) {
-                $rootScope.common.onStatOptInClick();
-              }
-            });
-        }
+        $q.all([api.system.getStats(), api.admin.getBuildInfo(), api.activation.getActivation()]).then(function(sbaResults) {
+          var statsResult = sbaResults[0];
+          var buildResult = sbaResults[1];
+          var activationResult = sbaResults[2];
 
+          // Modal (or notification) for activation
+          if (activationResult && activationResult.data) {
+            var activationInfo = $rootScope.common.activationInfo = activationResult.data;
+            if (activationInfo.enabled) {
+              var difDays = authService.daysUntilProductExpiration(activationInfo.info.expiration);
+              if (difDays < 0) {
+                // if it is still valid, it is because only core stages are in use
+                if (!activationInfo.info.valid || $location.search().activationKey) {
+                  // When activation is not valid, roles other than adminActivation are not returned
+                  if ($rootScope.isAdmin || authService.isAuthorized(userRoles.adminActivation)) {
+                    $rootScope.common.showRegistrationModal();
+                  } else {
+                    $rootScope.common.showRegistrationPermissionErrorModal();
+                  }
+                  if (!activationInfo.info.valid) {
+                    $rootScope.common.infoList = [{
+                      message: 'Activation key expired, you need to get a new one from StreamSets'
+                    }];
+                  }
+                }
+              } else if (difDays < 30) {
+                $rootScope.common.infoList = [{
+                  message: 'Activation key expires in ' + difDays + '  days'
+                }];
+              } else if (!activationInfo.info.valid) {
+                $rootScope.common.infoList = [{
+                  message: 'Activation key is not valid'
+                }];
+              }
+            }
+          }
+
+          // Analytics tracking
+          if (buildResult && buildResult.data) {
+            $timeout(
+              function() {
+                Analytics.set('dimension1', buildResult.data.version); // dimension1 is sdcVersion
+                mixpanel.register({'sdcVersion': buildResult.data.version});
+              },
+              1000
+            );
+          }
+          if (statsResult.data.active && statsResult.data.stats && statsResult.data.stats.activeStats && statsResult.data.stats.activeStats.extraInfo) {
+            $timeout(
+              function() {
+                var stats = statsResult.data.stats;
+                if (stats.activeStats.extraInfo) {
+                  if (stats.activeStats.extraInfo.cloudProvider) {
+                    Analytics.set('dimension2', stats.activeStats.extraInfo.cloudProvider); // dimension2 is cloudProvider
+                    mixpanel.register({'cloudProvider': stats.activeStats.extraInfo.cloudProvider});
+                  }
+                  if (stats.activeStats.extraInfo.distributionChannel) {
+                    Analytics.set('dimension3', stats.activeStats.extraInfo.distributionChannel); // dimension3 is distributionChannel
+                    mixpanel.register({'distributionChannel': stats.activeStats.extraInfo.distributionChannel});
+                  }
+                }
+              },
+              1000
+            );
+          }
+        });
       });
 
     api.pipelineAgent.getAllAlerts()

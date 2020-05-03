@@ -161,4 +161,28 @@ public class TestKafkaSourceUpgrader {
 
     UpgraderTestUtils.assertExists(configs, dataFormatPrefix + "preserveRootElement", false);
   }
+
+  @Test
+  public void testV10ToV11() {
+    Mockito.doReturn(10).when(context).getFromVersion();
+    Mockito.doReturn(11).when(context).getToVersion();
+
+    configs = upgrader.upgrade(configs, context);
+
+    UpgraderTestUtils.assertExists(
+        configs,
+        "kafkaConfigBean.provideKeytab",
+        false
+    );
+    UpgraderTestUtils.assertExists(
+        configs,
+        "kafkaConfigBean.userKeytab",
+        ""
+    );
+    UpgraderTestUtils.assertExists(
+        configs,
+        "kafkaConfigBean.userPrincipal",
+        "user/host@REALM"
+    );
+  }
 }

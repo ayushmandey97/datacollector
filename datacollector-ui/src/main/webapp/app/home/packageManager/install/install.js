@@ -20,7 +20,8 @@
 angular
   .module('dataCollectorApp.home')
   .controller('InstallModalInstanceController',
-      function ($scope, $rootScope, $modalInstance, libraryList, withStageLibVersion, api, pipelineConstant, $modal) {
+      function ($scope, $rootScope, $modalInstance, libraryList, withStageLibVersion, api, pipelineConstant, $modal,
+        authService) {
     angular.extend($scope, {
       common: {
         errors: []
@@ -31,10 +32,7 @@ angular
       operationStatusMap: {},
       failedLibraries: [],
       errorMap: {},
-      agreementCheckModel: {
-        hasEnterpriseConnectors: false,
-        agreementChecked: false,
-      },
+      registrationNeeded: false,
 
       install: function(givenLibraries) {
         $scope.operationStatus = 'installing';
@@ -135,6 +133,11 @@ angular
 
       hasErrors: function() {
         return _.any($scope.errorMap);
+      },
+
+      register: function() {
+        $modalInstance.dismiss('cancel');
+        $rootScope.common.showRegistrationModal();
       }
     });
 
@@ -143,10 +146,17 @@ angular
         if (library.stageLibraryManifest.stageLibId.indexOf('streamsets-datacollector-mapr_') !== -1) {
           $scope.maprStageLib = true;
         }
-        if (library.stageLibraryManifest.stageLibLicense === 'StreamSetsEnterprise1.0') {
-          $scope.agreementCheckModel.hasEnterpriseConnectors = true;
-        }
       });
     }
 
+    if ($rootScope.common.activationInfo) {
+      var activationInfo = $rootScope.common.activationInfo;
+      if (activationInfo.info && activationInfo.enabled) {
+        var difDays = authService.daysUntilProductExpiration(activationInfo.info.expiration);
+        if (activationInfo.info.valid && difDays < 0) {
+          // registration will be needed after any new stages are installed
+          $scope.registrationNeeded = true;
+        }
+      }
+    }
   });

@@ -23,12 +23,12 @@
   <parent>
     <groupId>com.streamsets</groupId>
     <artifactId>streamsets-datacollector-stage-lib-parent</artifactId>
-    <version>3.15.0-SNAPSHOT</version>
+    <version>3.16.0-SNAPSHOT</version>
     <relativePath>../stage-lib-parent</relativePath>
   </parent>
   <groupId>com.streamsets</groupId>
   <artifactId>streamsets-datacollector-mapr_6_0-mep5-lib</artifactId>
-  <version>3.15.0-SNAPSHOT</version>
+  <version>3.16.0-SNAPSHOT</version>
   <description>StreamSets Data Collector MapR 6.0.1 MEP 5 Lib</description>
   <name>StreamSets Data Collector MapR 6.0.1 MEP 5 Lib</name>
   <packaging>jar</packaging>
@@ -40,6 +40,7 @@
     <hive.version>2.1.1-mapr-1803</hive.version>
     <zookeeper.version>3.4.5-mapr-1710</zookeeper.version>
     <spark.version>2.2.1-mapr-1803</spark.version>
+    <jackson.version>2.6.5</jackson.version>
  </properties>
 
   <dependencies>
@@ -339,6 +340,12 @@
     </dependency>
 
     <dependency>
+      <groupId>com.fasterxml.jackson.module</groupId>
+      <artifactId>jackson-module-scala_2.11</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+
+    <dependency>
       <groupId>org.apache.spark</groupId>
       <artifactId>spark-core_2.11</artifactId>
       <version>${spark.version}</version>
@@ -361,6 +368,11 @@
           <artifactId>jackson-databind</artifactId>
         </exclusion>
       </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-sql_2.11</artifactId>
+      <version>${spark.version}</version>
     </dependency>
 
   </dependencies>

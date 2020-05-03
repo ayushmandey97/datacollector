@@ -27,24 +27,33 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 public class ActiveStats {
   private final Logger LOG = LoggerFactory.getLogger(ActiveStats.class);
 
-  public static final String VERSION = "1.0";
+  public static final String VERSION = "1.2";
 
   private long startTime;
   private long endTime;
+  private String sdcId;
+  private String productName;
   private String dataCollectorVersion;
+  private String buildRepoSha;
+  private Map<String, Object> extraInfo;
   private boolean dpmEnabled;
   private UsageTimer upTime;
   private Map<String, UsageTimer> pipelines;
   private Map<String, UsageTimer> stages;
   private AtomicLong recordCount;
   private Map<String, Long> errorCodes;
+  private Map<String, FirstPipelineUse> createToPreview;
+  private Map<String, FirstPipelineUse> createToRun;
+
 
   public ActiveStats() {
     startTime = System.currentTimeMillis();
@@ -53,7 +62,27 @@ public class ActiveStats {
     stages = new ConcurrentHashMap<>();
     recordCount = new AtomicLong();
     dataCollectorVersion = "";
-    errorCodes = new HashMap<>();
+    errorCodes = new ConcurrentHashMap<>();
+    createToPreview = new ConcurrentHashMap<>();
+    createToRun = new ConcurrentHashMap<>();
+  }
+
+  public String getSdcId() {
+    return sdcId;
+  }
+
+  public ActiveStats setSdcId(String sdcId) {
+    this.sdcId = sdcId;
+    return this;
+  }
+
+  public String getProductName() {
+    return productName;
+  }
+
+  public ActiveStats setProductName(String productName) {
+    this.productName = productName;
+    return this;
   }
 
   public String getVersion() {
@@ -88,6 +117,24 @@ public class ActiveStats {
 
   public ActiveStats setDataCollectorVersion(String version) {
     this.dataCollectorVersion = version;
+    return this;
+  }
+
+  public String getBuildRepoSha() {
+    return buildRepoSha;
+  }
+
+  public ActiveStats setBuildRepoSha(String buildRepoSha) {
+    this.buildRepoSha = buildRepoSha;
+    return this;
+  }
+
+  public Map<String, Object> getExtraInfo() {
+    return extraInfo;
+  }
+
+  public ActiveStats setExtraInfo(Map<String, Object> extraInfo) {
+    this.extraInfo = extraInfo;
     return this;
   }
 
@@ -161,16 +208,64 @@ public class ActiveStats {
     return Collections.unmodifiableMap(errorCodes);
   }
 
+
+  public Map<String, FirstPipelineUse> getCreateToPreview() {
+    return createToPreview;
+  }
+
+  public ActiveStats setCreateToPreview(Map<String, FirstPipelineUse> createToPreview) {
+    this.createToPreview = new ConcurrentHashMap<>();
+    createToPreview.entrySet().stream().forEach(e -> this.createToPreview.put(e.getKey(), (FirstPipelineUse) e.getValue().clone()));
+    return this;
+  }
+
+  public Map<String, FirstPipelineUse> getCreateToRun() {
+    return createToRun;
+  }
+
+  public ActiveStats setCreateToRun(Map<String, FirstPipelineUse> createToRun) {
+    this.createToRun = new ConcurrentHashMap<>();
+    createToRun.entrySet().stream().forEach(e -> this.createToRun.put(e.getKey(), (FirstPipelineUse) e.getValue().clone()));
+    return this;
+  }
+
+  public ActiveStats createPipeline(String pipelineId) {
+    long now = System.currentTimeMillis();
+    createToPreview.put(pipelineId, new FirstPipelineUse().setCreatedOn(now));
+    createToRun.put(pipelineId, new FirstPipelineUse().setCreatedOn(now));
+    return this;
+  }
+
+  public ActiveStats previewPipeline(String pipelineId) {
+    FirstPipelineUse created = createToPreview.get(pipelineId);
+    if (created != null) {
+      if (created.getFirstUseOn() == -1) {
+        created.setFirstUseOn(System.currentTimeMillis());
+      }
+    }
+    return this;
+  }
+
   public ActiveStats startPipeline(PipelineConfiguration pipeline) {
     LOG.debug("Starting UsageTimers for '{}' pipeline and its stages", pipeline.getPipelineId());
+    FirstPipelineUse created = createToRun.get(pipeline.getPipelineId());
+    if (created != null) {
+      if (created.getFirstUseOn() == -1) {
+        created.setFirstUseOn(System.currentTimeMillis());
+        created.setStageCount(pipeline.getStages().size());
+      }
+    }
+
     // we only start the pipeline stats if not running already (to avoid stage stats going out of wak)
-    if (pipelines.computeIfAbsent(
-        pipeline.getPipelineId(),
-        id -> new UsageTimer().setName(pipeline.getPipelineId())).startIfNotRunning()
-        ) {
+    UsageTimer pipelineUsageTimer = pipelines.computeIfAbsent(pipeline.getPipelineId(), id -> new UsageTimer().setName(pipeline.getPipelineId()));
+    if (pipelineUsageTimer.startIfNotRunning()) {
       for (StageConfiguration stageConfiguration : pipeline.getStages()) {
         String name = stageConfiguration.getLibrary() + "::" + stageConfiguration.getStageName();
-        stages.computeIfAbsent(name, (key) -> new UsageTimer().setName(name)).start();
+        UsageTimer stageUsageTimer = stages.computeIfAbsent(
+            name,
+            key -> new UsageTimer().setName(name)
+        );
+        stageUsageTimer.start();
       }
     }
     return this;
@@ -217,33 +312,64 @@ public class ActiveStats {
     return this;
   }
 
+  Map<String, FirstPipelineUse> removeUsedAndExpired(Map<String, FirstPipelineUse> map, long expiredTime) {
+    return map.entrySet()
+        .stream()
+        .filter(e -> e.getValue().getFirstUseOn() == -1 && e.getValue().getCreatedOn() > expiredTime)
+        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (f1, f2) -> {
+          throw new UnsupportedOperationException();
+        }, ConcurrentHashMap::new));
+  }
+
   // returns fresh bean with same UsageTimers just reset to zero accumulated time to be used as the new live stats
   public ActiveStats roll() {
     long now = System.currentTimeMillis();
     setEndTime(now);
-    ActiveStats statsBean = new ActiveStats().setStartTime(now)
-                                             .setDataCollectorVersion(getDataCollectorVersion())
-                                             .setDpmEnabled(isDpmEnabled())
-                                             .setErrorCodes(errorCodes)
-                                             .setUpTime(getUpTime().roll());
-    statsBean.setPipelines(getPipelines().stream().map(UsageTimer::roll).collect(Collectors.toList()));
-    statsBean.setStages(getStages().stream()
-                                   .filter(timer -> timer.getMultiplier() > 0)
-                                   .map(UsageTimer::roll)
-                                   .collect(Collectors.toList()));
+    ActiveStats statsBean = new ActiveStats()
+        .setSdcId(getSdcId())
+        .setProductName(getProductName())
+        .setStartTime(now)
+        .setDataCollectorVersion(getDataCollectorVersion())
+        .setBuildRepoSha(getBuildRepoSha())
+        .setExtraInfo(getExtraInfo())
+        .setDpmEnabled(isDpmEnabled())
+        .setUpTime(getUpTime().roll());
+    statsBean.setPipelines(
+        getPipelines().stream()
+            // If multiplier is 0, its not running/used anymore
+            .filter(u -> u.getMultiplier() > 0)
+            .map(UsageTimer::roll)
+            .collect(Collectors.toList())
+    );
+    statsBean.setStages(
+        getStages().stream()
+            // If multiplier is 0, its not running/used anymore
+            .filter(u -> u.getMultiplier() > 0)
+            .map(UsageTimer::roll)
+            .collect(Collectors.toList())
+    );
+    long expiredTime = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30);
+    statsBean.setCreateToPreview(removeUsedAndExpired(getCreateToPreview(), expiredTime));
+    statsBean.setCreateToRun(removeUsedAndExpired(getCreateToRun(), expiredTime));
     return statsBean;
   }
 
   // returns a snapshot for persistency
   public ActiveStats snapshot() {
-    ActiveStats snapshot = new ActiveStats().setStartTime(getStartTime())
+    ActiveStats snapshot = new ActiveStats().setSdcId(getSdcId())
+                                            .setProductName(getProductName())
+                                            .setStartTime(getStartTime())
                                             .setDataCollectorVersion(getDataCollectorVersion())
+                                            .setBuildRepoSha(getBuildRepoSha())
+                                            .setExtraInfo(getExtraInfo())
                                             .setDpmEnabled(isDpmEnabled())
                                             .setErrorCodes(errorCodes)
                                             .setUpTime(getUpTime().snapshot())
                                             .setRecordCount(getRecordCount());
     snapshot.setPipelines(getPipelines().stream().map(UsageTimer::snapshot).collect(Collectors.toList()));
     snapshot.setStages(getStages().stream().map(UsageTimer::snapshot).collect(Collectors.toList()));
+    snapshot.setCreateToPreview(getCreateToPreview());
+    snapshot.setCreateToRun(getCreateToRun());
     return snapshot;
   }
 

@@ -15,39 +15,32 @@
  */
 package com.streamsets.pipeline.stage.origin.jdbc.cdc.postgres;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.streamsets.pipeline.api.BatchMaker;
 import com.streamsets.pipeline.api.Field;
 import com.streamsets.pipeline.api.Record;
 import com.streamsets.pipeline.api.Source;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.base.BaseSource;
-import com.streamsets.pipeline.lib.executor.SafeScheduledExecutorService;
 import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
 import com.streamsets.pipeline.lib.jdbc.JdbcErrors;
 import com.streamsets.pipeline.lib.jdbc.parser.sql.DateTimeColumnHandler;
 import com.streamsets.pipeline.lib.util.ThreadUtil;
 import com.streamsets.pipeline.stage.common.DefaultErrorRecordHandler;
 import com.streamsets.pipeline.stage.common.ErrorRecordHandler;
+
+import java.nio.ByteBuffer;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Queue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingDeque;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.apache.commons.lang3.StringUtils;
 import org.postgresql.replication.LogSequenceNumber;
+import org.postgresql.replication.PGReplicationStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,20 +51,14 @@ public class PostgresCDCSource extends BaseSource {
   private static final String HIKARI_CONFIG_PREFIX = "hikariConf.";
   private static final String DRIVER_CLASSNAME = HIKARI_CONFIG_PREFIX + "driverClassName";
   private static final String CONNECTION_STR = HIKARI_CONFIG_PREFIX + "connectionString";
-  private static final int MAX_RECORD_GENERATION_ATTEMPTS = 100;
   private static final String PREFIX = "postgres.cdc.";
   private static final String LSN = PREFIX + "lsn";
   private static final String XID = PREFIX + "xid";
   private static final String TIMESTAMP_HEADER = PREFIX + "timestamp";
   private final PostgresCDCConfigBean configBean;
   private final HikariPoolConfigBean hikariConfigBean;
-  private volatile boolean generationStarted = false;
-  private volatile boolean runnerCreated = false;
   private PostgresCDCWalReceiver walReceiver = null;
   private String offset = null;
-  private BlockingQueue<PostgresWalRecord> cdcQueue;
-  private SafeScheduledExecutorService scheduledExecutor;
-  private PostgresWalRunner postgresWalRunner;
   private DateTimeColumnHandler dateTimeColumnHandler;
   private LocalDateTime startDate;
   private ZoneId zoneId;
@@ -169,72 +156,122 @@ public class PostgresCDCSource extends BaseSource {
       return issues;
     }
 
-    cdcQueue = new LinkedBlockingQueue<>();
     return issues;
+  }
+
+  private boolean isBatchDone(int currentBatchSize, int maxBatchSize, long startTime, boolean isNewRecordNull) {
+    return getContext().isStopped() ||
+        currentBatchSize >= maxBatchSize || // batch is full
+        (currentBatchSize > 0 && isNewRecordNull) || // newRecordNull = no more data from origin
+        System.currentTimeMillis() - startTime >= configBean.maxBatchWaitTime;
   }
 
   @Override
   public String produce(String lastSourceOffset, int maxBatchSize, final BatchMaker batchMaker) throws StageException {
 
+    LOG.debug("Starting produce with offset {}", lastSourceOffset);
     if (lastSourceOffset != null) {
       setOffset(StringUtils.trimToEmpty(lastSourceOffset));
     }
 
-    Long offsetAsLong = Long.valueOf(0);
-    if (getOffset() != null) {
-      offsetAsLong = LogSequenceNumber.valueOf(getOffset()).asLong();
-    }
-
-    if ( ! runnerCreated) {
-      runnerCreated = createRunner();
-    }
-
-    if (( ! generationStarted ) && runnerCreated) {
-      generationStarted = startGeneration();
-    }
-
-    PostgresWalRecord postgresWalRecord;
+    PostgresWalRecord postgresWalRecord = null;
     maxBatchSize = Math.min(configBean.baseConfigBean.maxBatchSize, maxBatchSize);
     int currentBatchSize = 0;
-    int recordGenerationAttempts = 0;
 
-    while (generationStarted &&
-          !getContext().isStopped() &&
-          currentBatchSize < maxBatchSize &&
-          recordGenerationAttempts++ < MAX_RECORD_GENERATION_ATTEMPTS) {
+    long startTime = System.currentTimeMillis();
 
-      postgresWalRecord = cdcQueue.poll();
+    while (
+        !isBatchDone(
+            currentBatchSize,
+            maxBatchSize,
+            startTime,
+            postgresWalRecord == null
+        )
+    ) {
+
+      postgresWalRecord = getNextRecordFromStream();
 
       if (postgresWalRecord == null) {
-        ThreadUtil.sleep(configBean.pollInterval * 1000 / 3);
-        continue;
+        LOG.debug("Received null postgresWalRecord");
+        ThreadUtil.sleep(configBean.pollInterval);
       }
+      else {
+        String recordLsn = postgresWalRecord.getLsn().asString();
+        LOG.debug("Received CDC with LSN {} from stream", recordLsn);
 
-      if (postgresWalRecord.getLsn().asLong() <= offsetAsLong) {
-        LOG.debug("Ignoring already processed CDC with LSN: {} ", postgresWalRecord.getLsn().asString());
-        continue;
-      }
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Valid CDC: {} ", postgresWalRecord);
+        }
 
-      if (LOG.isTraceEnabled()) {
-        LOG.trace("Valid CDC: {} ", postgresWalRecord);
-      }
+        final Record record = processWalRecord(postgresWalRecord);
 
-      final Record record = processWalRecord(postgresWalRecord);
+        Record.Header header = record.getHeader();
 
-      if (record != null) {
-        Map<String, String> attributes = new HashMap<>();
-        attributes.put(LSN, postgresWalRecord.getLsn().asString());
-        attributes.put(XID, postgresWalRecord.getXid());
-        attributes.put(TIMESTAMP_HEADER, postgresWalRecord.getTimestamp());
-        attributes.forEach((k, v) -> record.getHeader().setAttribute(k, v));
+        header.setAttribute(LSN, recordLsn);
+        header.setAttribute(XID, postgresWalRecord.getXid());
+        header.setAttribute(TIMESTAMP_HEADER, postgresWalRecord.getTimestamp());
+
         batchMaker.addRecord(record);
         currentBatchSize++;
         walReceiver.setLsnFlushed(postgresWalRecord.getLsn());
-        setOffset(postgresWalRecord.getLsn().asString());
+        setOffset(recordLsn);
       }
     }
     return getOffset();
   }
+
+
+  private PostgresWalRecord getNextRecordFromStream() {
+    /*
+        Replication slot has a configured timeout within postgres.
+        It is typical to set the poll timeout interval to be 1/3 this value.
+
+        readPending() is a non-blocking call that can generate a keepalive event
+        that is sent along replication stream StatusInterval.
+
+        The thread executing this run() is executed at a FixedSchedule at the
+        same rate.
+
+        forceUpdateStatus generates an event when there was no data.
+     */
+    ByteBuffer buffer;
+    PGReplicationStream stream = getWalReceiver().getStream();
+    LogSequenceNumber lastLSN = null;
+    PostgresWalRecord ret = null;
+    try {
+      if((buffer = stream.readPending()) != null) {
+
+        lastLSN = stream.getLastReceiveLSN();
+
+        if (lastLSN.asLong() == 0) {
+          lastLSN = LogSequenceNumber.valueOf(getOffset());
+        }
+
+        PostgresWalRecord postgresWalRecord = new PostgresWalRecord(
+            buffer,
+            lastLSN,
+            getConfigBean().decoderValue
+        );
+
+        ret = WalRecordFilteringUtils.filterRecord(postgresWalRecord, this);
+
+        if(ret == null && LOG.isDebugEnabled()) {
+          LOG.debug("Filtered out CDC: {} ", postgresWalRecord.toString());
+        }
+      }
+
+      // Force a feedback event along replication slot to avoid timeout.
+      if (lastLSN != null) {
+        stream.forceUpdateStatus();
+      }
+
+
+    } catch (SQLException e) {
+      LOG.error("Error reading PostgreSQL replication stream: {}", e.getMessage(), e);
+    }
+    return ret;
+  }
+
 
   private Record processWalRecord(PostgresWalRecord postgresWalRecord) {
     Source.Context context = getContext();
@@ -320,53 +357,13 @@ public class PostgresCDCSource extends BaseSource {
     return Optional.ofNullable(issues);
   }
 
-  private boolean createRunner() {
-    postgresWalRunner = new PostgresWalRunner(this);
-    return postgresWalRunner != null;
-  }
-
-  private PostgresWalRunner getRunner() {
-    return postgresWalRunner;
-  }
 
   public PostgresCDCWalReceiver getWalReceiver() {
     return walReceiver;
   }
 
-  private boolean startGeneration() {
-    scheduledExecutor = new SafeScheduledExecutorService(1, "postgresCDC");
-
-    if (scheduledExecutor == null) {
-      return false;
-    }
-
-    scheduledExecutor
-        .scheduleAtFixedRate(
-            getRunner(),
-            configBean.pollInterval,
-            configBean.pollInterval,
-            TimeUnit.SECONDS
-        );
-
-    return true;
-  }
-
-  @VisibleForTesting
-  public Queue<PostgresWalRecord> getQueue() {
-    return cdcQueue;
-  }
-
   @Override
   public void destroy() {
-    if (scheduledExecutor != null) {
-      scheduledExecutor.shutdown();
-      try {
-        scheduledExecutor.awaitTermination(5, TimeUnit.MINUTES);
-      } catch (InterruptedException ex) {
-        LOG.error("Interrupted while attempting to shutdown runner thread", ex);
-        Thread.currentThread().interrupt();
-      }
-    }
     if (configBean.removeSlotOnClose) {
       try {
         getWalReceiver().dropReplicationSlot(configBean.slot);

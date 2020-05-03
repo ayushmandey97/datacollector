@@ -19,11 +19,11 @@ import com.google.common.base.Joiner;
 import com.google.common.net.HostAndPort;
 import com.streamsets.pipeline.api.ConfigDef;
 import com.streamsets.pipeline.api.ConfigDefBean;
-import com.streamsets.pipeline.api.Dependency;
 import com.streamsets.pipeline.api.Record;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.ValueChooserModel;
+import com.streamsets.pipeline.api.credential.CredentialValue;
 import com.streamsets.pipeline.api.el.ELEval;
 import com.streamsets.pipeline.api.el.ELEvalException;
 import com.streamsets.pipeline.api.el.ELVars;
@@ -43,7 +43,7 @@ import com.streamsets.pipeline.lib.el.ELUtils;
 import com.streamsets.pipeline.lib.el.RecordEL;
 import com.streamsets.pipeline.lib.kafka.KafkaConstants;
 import com.streamsets.pipeline.lib.kafka.KafkaErrors;
-import com.streamsets.pipeline.sdk.ElUtil;
+import com.streamsets.pipeline.lib.kafka.KafkaKerberosUtil;
 import com.streamsets.pipeline.stage.destination.lib.DataGeneratorFormatConfig;
 import org.apache.avro.generic.GenericRecord;
 import org.slf4j.Logger;
@@ -244,13 +244,51 @@ public class KafkaTargetConfig {
   )
   public Map<String, String> kafkaProducerConfigs = new HashMap<>();
 
+ @ConfigDef(
+     required = true,
+     type = ConfigDef.Type.BOOLEAN,
+     defaultValue = "false",
+     label = "Provide Keytab",
+     description = "Use a unique Kerberos keytab and principal for this stage to securely connect to Kafka through Kerberos. Overrides the default Kerberos keytab and principal configured for the Data Collector installation.",
+     displayPosition = 65,
+     group = "#0"
+ )
+ public boolean provideKeytab;
+
+ @ConfigDef(
+     required = true,
+     type = ConfigDef.Type.CREDENTIAL,
+     defaultValue = "",
+     label = "Keytab",
+     description = "Base64 encoded keytab to use for this stage. Paste the contents of the base64 encoded keytab, or use a credential function to retrieve the base64 keytab from a credential store.",
+     displayPosition = 70,
+     dependsOn = "provideKeytab",
+     triggeredByValue = "true",
+     group = "#0",
+     upload = ConfigDef.Upload.BASE64
+ )
+ public CredentialValue userKeytab;
+
+ @ConfigDef(
+     required = true,
+     type = ConfigDef.Type.STRING,
+     defaultValue = "user/host@REALM",
+     label = "Principal",
+     description = "Kerberos service principal to use for this stage.",
+     displayPosition = 80,
+     dependsOn = "provideKeytab",
+     triggeredByValue = "true",
+     group = "#0"
+ )
+ public String userPrincipal;
+
   @ConfigDef(
       required = false,
       type = ConfigDef.Type.STRING,
       defaultValue = "${avro:decode(record:attribute('avroKeySchema'),base64:decodeBytes(record:attribute('kafkaMessageKey')))}",
       label = "Kafka Message Key",
       description = "The Kafka message key",
-      displayPosition = 70,
+      displayPosition = 90,
       dependsOn = "messageKeyFormat",
       triggeredByValue = "AVRO",
       group = "#0",
@@ -265,7 +303,7 @@ public class KafkaTargetConfig {
       defaultValue = "${record:attribute('kafkaMessageKey')}",
       label = "Kafka Message Key",
       description = "The Kafka message key",
-      displayPosition = 80,
+      displayPosition = 100,
       group = "#0",
       dependsOn = "messageKeyFormat",
       triggeredByValue = "STRING",
@@ -296,6 +334,7 @@ public class KafkaTargetConfig {
   private int messageSendMaxRetries;
   // holds the value of 'retry.backoff.ms' supplied by the user or the default value
   private long retryBackoffMs;
+  private String keytabFileName;
 
   public void init(Stage.Context context, List<Stage.ConfigIssue> issues) {
     init(context, this.dataFormat, false, issues);
@@ -367,6 +406,16 @@ public class KafkaTargetConfig {
         KAFKA_CONFIG_BEAN_PREFIX + "metadataBrokerList",
         context
     );
+
+    if (provideKeytab && kafkaValidationUtil.isProvideKeytabAllowed(issues, context)) {
+      keytabFileName = KafkaKerberosUtil.saveUserKeytab(
+          userKeytab.get(),
+          userPrincipal,
+          kafkaProducerConfigs,
+          issues,
+          context
+      );
+    }
 
     //check if the topic contains EL expression with record: functions
     //If yes, then validate the EL expression. Do not validate for existence of topic
@@ -508,6 +557,11 @@ public class KafkaTargetConfig {
     if(kafkaProducer != null) {
       kafkaProducer.destroy();
     }
+  }
+
+  public void destroy(Stage.Context context) {
+    KafkaKerberosUtil.deleteUserKeytabIfExists(keytabFileName, context);
+    destroy();
   }
 
   private void validatePartitionExpression(Stage.Context context, List<Stage.ConfigIssue> issues) {

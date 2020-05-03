@@ -20,6 +20,7 @@ import com.streamsets.pipeline.api.ConfigDefBean;
 import com.streamsets.pipeline.api.FieldSelectorModel;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.ValueChooserModel;
+import com.streamsets.pipeline.api.credential.CredentialValue;
 import com.streamsets.pipeline.config.DataFormat;
 import com.streamsets.pipeline.lib.kafka.KafkaAutoOffsetReset;
 import com.streamsets.pipeline.lib.kafka.KafkaAutoOffsetResetValues;
@@ -163,13 +164,51 @@ public class MultiKafkaBeanConfig {
 
   @ConfigDef(
       required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      defaultValue = "false",
+      label = "Provide Keytab",
+      description = "Use a unique Kerberos keytab and principal for this stage to securely connect to Kafka through Kerberos. Overrides the default Kerberos keytab and principal configured for the Data Collector installation.",
+      displayPosition = 105,
+      group = "KAFKA"
+  )
+  public boolean provideKeytab;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.CREDENTIAL,
+      defaultValue = "",
+      label = "Keytab",
+      description = "Base64 encoded keytab to use for this stage. Paste the contents of the base64 encoded keytab, or use a credential function to retrieve the base64 encoded keytab from a credential store.",
+      displayPosition = 110,
+      dependsOn = "provideKeytab",
+      triggeredByValue = "true",
+      group = "KAFKA",
+      upload = ConfigDef.Upload.BASE64
+  )
+  public CredentialValue userKeytab;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.STRING,
+      defaultValue = "user/host@REALM",
+      label = "Principal",
+      description = "Kerberos service principal to use for this stage.",
+      displayPosition = 120,
+      dependsOn = "provideKeytab",
+      triggeredByValue = "true",
+      group = "KAFKA"
+  )
+  public String userPrincipal;
+
+  @ConfigDef(
+      required = true,
       type = ConfigDef.Type.MODEL,
       label = "Key Deserializer",
       description = "Method used to deserialize the Kafka message key. Set to Confluent when the Avro schema ID is embedded in each message.",
       defaultValue = "STRING",
       dependsOn = "dataFormat",
       triggeredByValue = "AVRO",
-      displayPosition = 110,
+      displayPosition = 130,
       group = "KAFKA"
   )
   @ValueChooserModel(KeyDeserializerChooserValues.class)
@@ -181,7 +220,7 @@ public class MultiKafkaBeanConfig {
       label = "Key Capture Mode",
       description = "Controls how the Kafka message key is stored in the record.",
       defaultValue = "NONE",
-      displayPosition = 115,
+      displayPosition = 135,
       group = "KAFKA"
   )
   @ValueChooserModel(KeyCaptureModeChooserValues.class)
@@ -193,7 +232,7 @@ public class MultiKafkaBeanConfig {
       label = "Key Capture Header Attribute",
       description = "Sets the record header attribute name where the message key will be stored.",
       defaultValue = "kafkaMessageKey",
-      displayPosition = 116,
+      displayPosition = 136,
       group = "KAFKA",
       dependsOn = "keyCaptureMode",
       triggeredByValue = {"RECORD_HEADER", "RECORD_HEADER_AND_FIELD"}
@@ -206,7 +245,7 @@ public class MultiKafkaBeanConfig {
       label = "Key Capture Field",
       description = "Sets the record field where the message key will be stored.",
       defaultValue = "/kafkaMessageKey",
-      displayPosition = 117,
+      displayPosition = 137,
       group = "KAFKA",
       dependsOn = "keyCaptureMode",
       triggeredByValue = {"RECORD_FIELD", "RECORD_HEADER_AND_FIELD"}
@@ -222,11 +261,23 @@ public class MultiKafkaBeanConfig {
       defaultValue = "DEFAULT",
       dependsOn = "dataFormat",
       triggeredByValue = "AVRO",
-      displayPosition = 120,
+      displayPosition = 140,
       group = "KAFKA"
   )
   @ValueChooserModel(ValueDeserializerChooserValues.class)
   public Deserializer valueDeserializer = Deserializer.DEFAULT;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      defaultValue = "false",
+      label = "Include Timestamps",
+      description = "Includes the timestamps inherited from Kafka in the record header",
+      displayPosition = 130,
+      group = "KAFKA"
+  )
+  public boolean timestampsEnabled;
+
 
   public void init(Stage.Context context, List<Stage.ConfigIssue> issues) {
 

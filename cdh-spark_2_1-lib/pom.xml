@@ -23,12 +23,12 @@
   <parent>
     <groupId>com.streamsets</groupId>
     <artifactId>streamsets-datacollector-stage-lib-parent</artifactId>
-    <version>3.15.0-SNAPSHOT</version>
+    <version>3.16.0-SNAPSHOT</version>
     <relativePath>../stage-lib-parent</relativePath>
   </parent>
   <groupId>com.streamsets</groupId>
   <artifactId>streamsets-datacollector-cdh-spark_2_1-lib</artifactId>
-  <version>3.15.0-SNAPSHOT</version>
+  <version>3.16.0-SNAPSHOT</version>
   <description>StreamSets Data Collector CDH Cluster Cloudera Spark 2.1 Lib</description>
   <name>StreamSets Data Collector CDH Cluster Spark 2.1 Lib</name>
   <packaging>jar</packaging>
@@ -38,6 +38,8 @@
     <spark.version>2.1.0.cloudera1</spark.version>
     <kafka.version>0.10.0-kafka-2.1.0</kafka.version>
     <zkclient.version>0.8</zkclient.version>
+    <!-- make Jackson version match the one depended on by jackson-module-scala -->
+    <jackson.version>2.6.5</jackson.version>
   </properties>
 
   <dependencies>
@@ -52,6 +54,12 @@
       <groupId>com.streamsets</groupId>
       <artifactId>streamsets-datacollector-spark-api</artifactId>
       <scope>compile</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-sql_2.11</artifactId>
+      <version>${spark.version}</version>
     </dependency>
 
     <dependency>
@@ -159,6 +167,12 @@
       <artifactId>streamsets-datacollector-cluster-bootstrap-api</artifactId>
       <version>${project.version}</version>
       <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>com.fasterxml.jackson.core</groupId>
+          <artifactId>jackson-annotations</artifactId>
+        </exclusion>
+      </exclusions>
    </dependency>
 
     <dependency>

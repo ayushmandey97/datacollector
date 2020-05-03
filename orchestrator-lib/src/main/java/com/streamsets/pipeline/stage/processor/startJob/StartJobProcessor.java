@@ -21,21 +21,16 @@ import com.streamsets.pipeline.api.Record;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.base.OnRecordErrorException;
 import com.streamsets.pipeline.api.base.SingleLaneProcessor;
-import com.streamsets.pipeline.api.el.ELEval;
-import com.streamsets.pipeline.api.el.ELVars;
-import com.streamsets.pipeline.api.impl.Utils;
-import com.streamsets.pipeline.lib.el.RecordEL;
-import com.streamsets.pipeline.lib.el.TimeNowEL;
-import com.streamsets.pipeline.lib.startJob.JobIdConfig;
+import com.streamsets.pipeline.lib.CommonUtil;
 import com.streamsets.pipeline.lib.startJob.StartJobCommon;
 import com.streamsets.pipeline.lib.startJob.StartJobConfig;
-import com.streamsets.pipeline.lib.startJob.StartJobSupplier;
-import com.streamsets.pipeline.lib.startJob.StartJobTemplateSupplier;
+import com.streamsets.pipeline.lib.startJob.StartJobErrors;
 import com.streamsets.pipeline.stage.common.DefaultErrorRecordHandler;
 import com.streamsets.pipeline.stage.common.ErrorRecordHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,12 +40,9 @@ import java.util.concurrent.Executors;
 
 public class StartJobProcessor extends SingleLaneProcessor {
 
-  private StartJobCommon startJobCommon;
-  private StartJobConfig conf;
-
-  private ELVars jobIdConfigVars;
-  private ELEval jobIdEval;
-  private ELEval runtimeParametersEval;
+  private static final Logger LOG = LoggerFactory.getLogger(StartJobProcessor.class);
+  private final StartJobCommon startJobCommon;
+  private final StartJobConfig conf;
   private ErrorRecordHandler errorRecordHandler;
 
   StartJobProcessor(StartJobConfig conf) {
@@ -61,11 +53,8 @@ public class StartJobProcessor extends SingleLaneProcessor {
   @Override
   protected List<ConfigIssue> init() {
     List<ConfigIssue> issues = super.init();
-    jobIdConfigVars = getContext().createELVars();
-    jobIdEval = getContext().createELEval("jobId");
-    runtimeParametersEval = getContext().createELEval("runtimeParameters");
     errorRecordHandler = new DefaultErrorRecordHandler(getContext());
-    return this.startJobCommon.init(issues, getContext());
+    return this.startJobCommon.init(issues, errorRecordHandler, getContext());
   }
 
   public void process(Batch batch, SingleLaneBatchMaker batchMaker) throws StageException {
@@ -79,65 +68,10 @@ public class StartJobProcessor extends SingleLaneProcessor {
         firstRecord = record;
       }
       try {
-        if (conf.jobTemplate) {
-          RecordEL.setRecordInContext(jobIdConfigVars, record);
-          TimeNowEL.setTimeNowInContext(jobIdConfigVars, new Date());
-          String templateJobId = jobIdEval.eval(
-              jobIdConfigVars,
-              conf.templateJobId,
-              String.class
-          );
-          String runtimeParametersList = runtimeParametersEval.eval(
-              jobIdConfigVars,
-              conf.runtimeParametersList,
-              String.class
-          );
-          CompletableFuture<Field> future = CompletableFuture.supplyAsync(new StartJobTemplateSupplier(
-              conf,
-              templateJobId,
-              runtimeParametersList,
-              errorRecordHandler
-          ), executor);
-          startJobFutures.add(future);
-        } else {
-          for(JobIdConfig jobIdConfig: conf.jobIdConfigList) {
-            JobIdConfig resolvedJobIdConfig = new JobIdConfig();
-            RecordEL.setRecordInContext(jobIdConfigVars, record);
-            TimeNowEL.setTimeNowInContext(jobIdConfigVars, new Date());
-            resolvedJobIdConfig.jobId = jobIdEval.eval(
-                jobIdConfigVars,
-                jobIdConfig.jobId,
-                String.class
-            );
-            resolvedJobIdConfig.runtimeParameters = runtimeParametersEval.eval(
-                jobIdConfigVars,
-                jobIdConfig.runtimeParameters,
-                String.class
-            );
-            CompletableFuture<Field> future = CompletableFuture.supplyAsync(new StartJobSupplier(
-                conf,
-                resolvedJobIdConfig,
-                errorRecordHandler
-            ), executor);
-            startJobFutures.add(future);
-          }
-        }
+        startJobFutures.addAll(startJobCommon.getStartJobFutures(executor, record));
       } catch (OnRecordErrorException ex) {
-        switch (this.getContext().getOnErrorRecord()) {
-          case DISCARD:
-            break;
-          case TO_ERROR:
-            this.getContext().toError(record, ex);
-            break;
-          case STOP_PIPELINE:
-            throw ex;
-          default:
-            throw new IllegalStateException(Utils.format(
-                "It should never happen. OnError '{}'",
-                this.getContext().getOnErrorRecord(),
-                ex
-            ));
-        }
+        LOG.error(ex.toString(), ex);
+        errorRecordHandler.onError(ex);
       }
     }
 
@@ -146,27 +80,17 @@ public class StartJobProcessor extends SingleLaneProcessor {
     }
 
     try {
-      LinkedHashMap<String, Field> outputField = startJobCommon.startJobInParallel(
-          startJobFutures,
-          getContext()
+      LinkedHashMap<String, Field> outputField = startJobCommon.startJobInParallel(startJobFutures);
+      firstRecord = CommonUtil.createOrchestratorTaskRecord(
+          firstRecord,
+          getContext(),
+          conf.taskName,
+          outputField
       );
-
-      if (firstRecord == null) {
-        firstRecord = getContext().createRecord("startJobProcessor");
-        firstRecord.set(Field.createListMap(outputField));
-      } else {
-        Field rootField = firstRecord.get();
-        if (rootField.getType() == Field.Type.LIST_MAP) {
-          // If the root field merge results with existing record
-          LinkedHashMap<String, Field> currentField = rootField.getValueAsListMap();
-          currentField.putAll(outputField);
-        } else {
-          firstRecord.set(Field.createListMap(outputField));
-        }
-      }
       batchMaker.addRecord(firstRecord);
     } catch (Exception ex) {
-      getContext().reportError(ex);
+      LOG.error(ex.toString(), ex);
+      errorRecordHandler.onError(StartJobErrors.START_JOB_08, ex.toString(), ex);
     }
   }
 

@@ -16,7 +16,6 @@
 package com.streamsets.pipeline.stage.processor.jdbclookup;
 
 import com.google.common.collect.ImmutableList;
-import com.streamsets.pipeline.api.ConfigIssue;
 import com.streamsets.pipeline.api.Field;
 import com.streamsets.pipeline.api.OnRecordError;
 import com.streamsets.pipeline.api.Record;
@@ -39,7 +38,6 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import javax.validation.constraints.AssertTrue;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;

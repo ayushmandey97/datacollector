@@ -29,6 +29,8 @@ public enum KafkaErrors implements ErrorCode {
   KAFKA_09("Invalid Zookeeper connect string '{}' : {}"),
   KAFKA_10("Cannot validate configuration: {}"),
   KAFKA_11("Cannot retrieve metadata for topic '{}' from broker '{}': {}"),
+  KAFKA_12("Dynamic Kerberos authentication is only supported in versions >= 0.11"),
+  KAFKA_13("Unable to store keytab file in disk"),
 
   //Kafka source messages
   KAFKA_21("Cannot find a new leader after a Kafka broker failure"),
@@ -52,6 +54,7 @@ public enum KafkaErrors implements ErrorCode {
   KAFKA_43("Schema Registry URLs must be configured to use Confluent Deserializer"),
   KAFKA_44("Confluent Avro Deserializer not supported by this version of Kafka."),
   KAFKA_74("Message payload cannot be null"),
+  KAFKA_78("Batch size greater than maximal batch size allowed in sdc.properties, maxBatchSize: {}"),
 
   //Kafka target messages
   KAFKA_50("Error writing data to the Kafka broker: {}"),

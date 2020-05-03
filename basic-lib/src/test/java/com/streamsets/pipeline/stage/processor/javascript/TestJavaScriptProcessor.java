@@ -20,6 +20,8 @@ import com.streamsets.pipeline.api.Field;
 import com.streamsets.pipeline.api.OnRecordError;
 import com.streamsets.pipeline.api.Processor;
 import com.streamsets.pipeline.api.Record;
+import com.streamsets.pipeline.api.StageBehaviorFlags;
+import com.streamsets.pipeline.api.StageDef;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.sdk.ProcessorRunner;
 import com.streamsets.pipeline.sdk.RecordCreator;
@@ -31,6 +33,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -697,5 +700,30 @@ public class TestJavaScriptProcessor {
         JavaScriptDProcessor.class,
         processor
     );
+  }
+
+  @Test
+  public void testUserCodeInjectionFlag() {
+    Assert.assertArrayEquals(
+        "This stage should _only_ have the USER_CODE_INJECTION flag set",
+        new StageBehaviorFlags[]{StageBehaviorFlags.USER_CODE_INJECTION},
+        JavaScriptDProcessor.class.getAnnotation(StageDef.class).flags()
+    );
+  }
+
+  @Test
+  public void testNativeNullRootField() {
+    String script = "records[0].value = null;\n" +
+        "sdc.output.write(records[0]);\n";
+
+    Processor processor = new JavaScriptProcessor(
+        ProcessingMode.RECORD,
+        script,
+        "",
+        "",
+        ScriptRecordType.NATIVE_OBJECTS,
+        Collections.emptyMap()
+    );
+    ScriptingProcessorTestUtil.verifyNativeNullRootValue(JavaScriptDProcessor.class, processor);
   }
 }

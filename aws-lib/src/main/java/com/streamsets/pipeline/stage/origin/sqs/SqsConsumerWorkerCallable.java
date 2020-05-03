@@ -84,7 +84,7 @@ public class SqsConsumerWorkerCallable implements Callable<Exception> {
   private long lastBatchStartTimestamp;
   private int batchRecordCount;
 
-  public SqsConsumerWorkerCallable(
+  SqsConsumerWorkerCallable(
       AmazonSQSAsync sqsAsync,
       PushSource.Context context,
       Map<String, String> queueUrlToNamePrefix,
@@ -101,9 +101,7 @@ public class SqsConsumerWorkerCallable implements Callable<Exception> {
     this.sqsAsync = sqsAsync;
     this.context = context;
     this.queueUrlToNamePrefix = new HashMap<>();
-    if (queueUrlToNamePrefix != null) {
-      this.queueUrlToNamePrefix.putAll(queueUrlToNamePrefix);
-    }
+    Optional.ofNullable(queueUrlToNamePrefix).ifPresent(this.queueUrlToNamePrefix::putAll);
     this.numMessagesPerRequest = numMessagesPerRequest;
     this.maxBatchWaitTimeMs = maxBatchWaitTimeMs;
     this.maxBatchSize = maxBatchSize;
@@ -122,7 +120,7 @@ public class SqsConsumerWorkerCallable implements Callable<Exception> {
     Exception terminatingException = null;
     final AmazonSQSAsync asyncConsumer = sqsAsync;
 
-    final ArrayBlockingQueue<String> urlQueue = new ArrayBlockingQueue(
+    final ArrayBlockingQueue<String> urlQueue = new ArrayBlockingQueue<>(
         queueUrlToNamePrefix.size(),
         false,
         queueUrlToNamePrefix.keySet()
@@ -137,7 +135,7 @@ public class SqsConsumerWorkerCallable implements Callable<Exception> {
         if (pollWaitTimeSeconds > 0) {
           receiveRequest.setWaitTimeSeconds(pollWaitTimeSeconds);
         }
-        if (messageAttributeNames.size() > 0) {
+        if (!messageAttributeNames.isEmpty()) {
           receiveRequest.setMessageAttributeNames(messageAttributeNames);
         }
         Future<ReceiveMessageResult> resultFuture = asyncConsumer.receiveMessageAsync(receiveRequest);
@@ -170,7 +168,7 @@ public class SqsConsumerWorkerCallable implements Callable<Exception> {
             batchContext.getBatchMaker().addRecord(record);
             commitQueueUrlsToMessages.put(nextQueueUrl, message);
 
-            if (++batchRecordCount > maxBatchSize) {
+            if (++batchRecordCount >= maxBatchSize) {
               cycleBatch();
             }
           } catch (DataParserException e) {
@@ -262,36 +260,20 @@ public class SqsConsumerWorkerCallable implements Callable<Exception> {
       context.processBatch(batchContext);
       if (!context.isPreview() && commitQueueUrlsToMessages.size() > 0) {
         for (String queueUrl : commitQueueUrlsToMessages.keySet()) {
-          DeleteMessageBatchRequest deleteRequest = new DeleteMessageBatchRequest().withQueueUrl(queueUrl);
-          List<DeleteMessageBatchRequestEntry> deleteRequestEntries = new LinkedList<>();
-          commitQueueUrlsToMessages.get(queueUrl).forEach(message -> {
-            deleteRequestEntries.add(new DeleteMessageBatchRequestEntry()
-                .withReceiptHandle(message.getReceiptHandle())
-                .withId(message.getMessageId())
-            );
-            // TODO: need to add receiptHandle, and figure out what that is
-          });
-          deleteRequest.setEntries(deleteRequestEntries);
-          Future<DeleteMessageBatchResult> deleteResultFuture = sqsAsync.deleteMessageBatchAsync(deleteRequest);
           try {
-            DeleteMessageBatchResult deleteResult = deleteResultFuture.get();
-            if (deleteResult.getFailed() != null) {
-              deleteResult.getFailed().forEach(failed -> LOG.error(
-                  "Failed to delete message ID {} from queue %s with code {}, sender fault {}",
-                  failed.getId(),
-                  queueUrl,
-                  failed.getCode(),
-                  failed.getSenderFault()
-              ));
-            }
-            if (LOG.isDebugEnabled()) {
-              if (deleteResult.getSuccessful() != null) {
-                deleteResult.getSuccessful().forEach(success -> LOG.debug(
-                    "Successfully deleted message ID {} from queue {}",
-                    success.getId(),
-                    queueUrl
-                ));
+            List<DeleteMessageBatchRequestEntry> deleteRequestEntries = new LinkedList<>();
+            for (Message message : commitQueueUrlsToMessages.get(queueUrl)) {
+              deleteRequestEntries.add(new DeleteMessageBatchRequestEntry()
+                  .withReceiptHandle(message.getReceiptHandle())
+                  .withId(message.getMessageId())
+              );
+              if (deleteRequestEntries.size() >= numMessagesPerRequest) {
+                sendDeleteMessageBatchRequest(queueUrl, deleteRequestEntries);
+                deleteRequestEntries.clear();
               }
+            }
+            if (!deleteRequestEntries.isEmpty()) {
+              sendDeleteMessageBatchRequest(queueUrl, deleteRequestEntries);
             }
           } catch (InterruptedException e) {
             LOG.error(
@@ -303,22 +285,6 @@ public class SqsConsumerWorkerCallable implements Callable<Exception> {
             );
             Thread.currentThread().interrupt();
             break;
-          } catch (ExecutionException e) {
-            String messageIds = getPendingDeleteMessageIds(queueUrl);
-            LOG.error(
-                Errors.SQS_08.getMessage(),
-                messageIds,
-                queueUrl,
-                e.getMessage(),
-                e
-            );
-            throw new StageException(
-                Errors.SQS_08,
-                messageIds,
-                queueUrl,
-                e.getMessage(),
-                e
-            );
           }
         }
       }
@@ -328,6 +294,52 @@ public class SqsConsumerWorkerCallable implements Callable<Exception> {
     if (startNew) {
       batchContext = context.startBatch();
       lastBatchStartTimestamp = Clock.systemUTC().millis();
+    }
+  }
+
+  private void sendDeleteMessageBatchRequest(
+      String queueUrl, List<DeleteMessageBatchRequestEntry> deleteRequestEntries
+  ) throws InterruptedException {
+    DeleteMessageBatchRequest deleteRequest = new DeleteMessageBatchRequest()
+        .withQueueUrl(queueUrl)
+        .withEntries(deleteRequestEntries);
+    Future<DeleteMessageBatchResult> deleteResultFuture = sqsAsync.deleteMessageBatchAsync(deleteRequest);
+    try {
+      DeleteMessageBatchResult deleteResult = deleteResultFuture.get();
+      if (deleteResult.getFailed() != null) {
+        deleteResult.getFailed().forEach(failed -> LOG.error(
+            "Failed to delete message ID {} from queue {} with code {}, sender fault {}",
+            failed.getId(),
+            queueUrl,
+            failed.getCode(),
+            failed.getSenderFault()
+        ));
+      }
+      if (LOG.isDebugEnabled()) {
+        if (deleteResult.getSuccessful() != null) {
+          deleteResult.getSuccessful().forEach(success -> LOG.debug(
+              "Successfully deleted message ID {} from queue {}",
+              success.getId(),
+              queueUrl
+          ));
+        }
+      }
+    } catch (ExecutionException e) {
+      String messageIds = getPendingDeleteMessageIds(queueUrl);
+      LOG.error(
+          Errors.SQS_08.getMessage(),
+          messageIds,
+          queueUrl,
+          e.getMessage(),
+          e
+      );
+      throw new StageException(
+          Errors.SQS_08,
+          messageIds,
+          queueUrl,
+          e.getMessage(),
+          e
+      );
     }
   }
 

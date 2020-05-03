@@ -16,6 +16,7 @@
 package com.streamsets.datacollector.store.impl;
 
 import com.streamsets.datacollector.config.PipelineConfiguration;
+import com.streamsets.datacollector.execution.EventListenerManager;
 import com.streamsets.datacollector.execution.PipelineStateStore;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.main.UserGroupManager;
@@ -27,6 +28,7 @@ import com.streamsets.datacollector.store.PipelineStoreTask;
 import com.streamsets.datacollector.util.LockCache;
 import com.streamsets.datacollector.util.LockCacheModule;
 import com.streamsets.datacollector.util.PipelineException;
+import com.streamsets.datacollector.util.credential.PipelineCredentialHandler;
 import com.streamsets.lib.security.acl.dto.Acl;
 import com.streamsets.lib.security.acl.dto.Action;
 import com.streamsets.lib.security.acl.dto.Permission;
@@ -69,6 +71,12 @@ public class TestFileAclStoreTask {
 
     @Provides
     @Singleton
+    public EventListenerManager provideEventListenerManager() {
+      return Mockito.spy(new EventListenerManager());
+    }
+
+    @Provides
+    @Singleton
     public StageLibraryTask provideStageLibrary() {
       return MockStages.createStageLibrary();
     }
@@ -93,9 +101,11 @@ public class TestFileAclStoreTask {
         RuntimeInfo runtimeInfo,
         StageLibraryTask stageLibraryTask,
         PipelineStateStore pipelineStateStore,
+        EventListenerManager eventListenerManager,
         LockCache<String> lockCache
     ) {
-      return new FilePipelineStoreTask(runtimeInfo, stageLibraryTask, pipelineStateStore, lockCache);
+      return new FilePipelineStoreTask(runtimeInfo, stageLibraryTask, pipelineStateStore,
+          eventListenerManager, lockCache, Mockito.mock(PipelineCredentialHandler.class));
     }
 
     @Provides

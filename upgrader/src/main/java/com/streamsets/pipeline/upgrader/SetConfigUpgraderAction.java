@@ -99,19 +99,20 @@ public class SetConfigUpgraderAction<T> extends UpgraderAction<SetConfigUpgrader
     ConfigsAdapter configsAdapter = wrap(configs);
 
     if (getLookForName() == null) {
-      configsAdapter.set(getName(), resolveValueIfEL(originalConfigs, getValue()));
+      configsAdapter.set(getName(), resolveValueIfEL(configsAdapter.toConfigMap(), getValue()));
     } else {
       boolean configFound = existsConfigWithValue(getLookForName(), getIfValueMatches(), configsAdapter);
       if (getName() != null && configFound) {
-        configsAdapter.set(getName(), resolveValueIfEL(originalConfigs, getValue()));
+        configsAdapter.set(getName(), resolveValueIfEL(configsAdapter.toConfigMap(), getValue()));
       } else if (getElseName() != null && !configFound) {
-        configsAdapter.set(getElseName(), resolveValueIfEL(originalConfigs, getElseValue()));
+        configsAdapter.set(getElseName(), resolveValueIfEL(configsAdapter.toConfigMap(), getElseValue()));
       }
     }
   }
 
   /**
-   * Check if a configuration exists and has a given value.
+   * Check if a configuration exists and has a given value.  If the configuration value is null, it'll match against
+   * empty string.
    *
    * @param name    Name of the configuration to look for.
    * @param value   Expected value for the configuration. Use {@value MATCHES_ALL} to accept any value.
@@ -125,11 +126,12 @@ public class SetConfigUpgraderAction<T> extends UpgraderAction<SetConfigUpgrader
         return true;
       } else {
         boolean matches;
-        if ((config.getValue() instanceof String)) {
+        Object configValue = config.getValue() != null ? config.getValue() : "";
+        if ((configValue instanceof String)) {
           Pattern pattern = Pattern.compile(value.toString());
-          matches = pattern.matcher(config.getValue().toString()).matches();
+          matches = pattern.matcher(configValue.toString()).matches();
         } else {
-          matches = config.getValue().equals(value);
+          matches = configValue.equals(value);
         }
         return matches;
       }

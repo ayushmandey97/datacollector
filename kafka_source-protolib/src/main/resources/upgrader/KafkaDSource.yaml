@@ -38,3 +38,14 @@ upgrades:
       - setConfig:
           name: kafkaConfigBean.dataFormatConfig.preserveRootElement
           value: false
+  - toVersion: 11
+    actions:
+      - setConfig:
+          name: kafkaConfigBean.provideKeytab
+          value: false
+      - setConfig:
+          name: kafkaConfigBean.userKeytab
+          value: ""
+      - setConfig:
+          name: kafkaConfigBean.userPrincipal
+          value: "user/host@REALM"

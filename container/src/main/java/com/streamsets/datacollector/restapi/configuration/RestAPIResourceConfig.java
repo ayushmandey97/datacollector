@@ -18,6 +18,7 @@ package com.streamsets.datacollector.restapi.configuration;
 import com.streamsets.datacollector.activation.Activation;
 import com.streamsets.datacollector.blobstore.BlobStoreTask;
 import com.streamsets.datacollector.bundles.SupportBundleManager;
+import com.streamsets.datacollector.credential.CredentialStoresTask;
 import com.streamsets.datacollector.event.handler.EventHandlerTask;
 import com.streamsets.datacollector.execution.Manager;
 import com.streamsets.datacollector.http.RolesAnnotationFilter;
@@ -25,6 +26,8 @@ import com.streamsets.datacollector.main.BuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.main.UserGroupManager;
 import com.streamsets.datacollector.restapi.RestAPI;
+import com.streamsets.datacollector.restapi.rbean.rest.PaginationInfoInjectorBinder;
+import com.streamsets.datacollector.security.usermgnt.UsersManager;
 import com.streamsets.datacollector.stagelibrary.StageLibraryTask;
 import com.streamsets.datacollector.store.AclStoreTask;
 import com.streamsets.datacollector.store.PipelineStoreTask;
@@ -61,10 +64,14 @@ public class RestAPIResourceConfig extends ResourceConfig {
         bindFactory(SupportBundleInjector.class).to(SupportBundleManager.class);
         bindFactory(EventHandlerTaskInjector.class).to(EventHandlerTask.class);
         bindFactory(BlobStoreTaskInjector.class).to(BlobStoreTask.class);
+        bindFactory(CredentialStoreTaskInjector.class).to(CredentialStoresTask.class);
+
         bindFactory(UserGroupManagerInjector.class).to(UserGroupManager.class);
+        bindFactory(UsersManagerInjector.class).to(UsersManager.class);
         bindFactory(ActivationInjector.class).to(Activation.class);
       }
     });
+    register(new PaginationInfoInjectorBinder());
 
     register(RolesAnnotationFilter.class);
     register(CsrfProtectionFilter.class);
@@ -73,6 +80,8 @@ public class RestAPIResourceConfig extends ResourceConfig {
     //Hooking up Swagger-Core
     register(ApiListingResource.class);
     register(SwaggerSerializers.class);
+
+    register(RestResponseFilter.class);
 
     //Configure and Initialize Swagger
     BeanConfig beanConfig = new BeanConfig();

@@ -21,7 +21,8 @@
         "restart": "Restart",
         "shutdown": "Shutdown",
         "statsOptIn": "Stat collection Opt In/Out",
-        "usersAndGroups": "Users & Groups"
+        "usersAndGroups": "Users & Groups",
+        "activation": "Activation"
       },
       "clusterManager": "Cluster Manager",
       "dpm": "StreamSets Control Hub",
@@ -35,7 +36,6 @@
         "useHelp": "Help:",
         "localHelp": "Local Help",
         "hostedHelp": "Hosted Help",
-        "register": "Register",
         "restFulAPI": "RESTful API",
         "settings": "Settings",
         "supportBundle": "Support Bundle"
@@ -256,7 +256,7 @@
     "statsOptIn": {
       "headerLabel": "Usage Statistics",
       "headerTitle": "Improve Data Collector with Usage Statistics",
-      "optInLabel": "Improve Data Collector by sending anonymized usage data."
+      "optInLabel": "Share usage data with StreamSets"
     },
     "commitPipelineHistory": {
       "committer": "Committed By",
@@ -393,6 +393,7 @@
       "viewStackTrace": "View Details"
     },
     "detailPane": {
+      "advancedIssuesNeedFix": "Advanced issues must be fixed before advanced options can be hidden",
       "alerts": "Alerts",
       "batchesPerSecond": "( batches / sec )",
       "emailIDs": "Email IDs",
@@ -799,7 +800,7 @@
   },
   "about": {
     "builtBy": "built by",
-    "copyrightText": "Copyright &copy; 2018 StreamSets, Inc. All rights reserved.",
+    "copyrightText": "Copyright &copy; 2020 StreamSets, Inc. All rights reserved.",
     "on": "on",
     "productName": "StreamSets Data Collector",
     "title": "About",
@@ -874,9 +875,9 @@
       "uninstall": "Uninstall"
     },
     "install": {
-      "confirmationMessage": "Are you sure you want to install the following stage libraries?",
+      "confirmationMessage": "The following libraries will be installed.",
       "successMessage": "Successfully installed stage libraries. Restart the Data Collector for the changes to take effect.",
-      "title": "Install Stage Library"
+      "title": "Install Stage Libraries"
     },
     "manifestURL": "Manifest URL",
     "noStageLibrary": "No Stage Library Found",
@@ -932,6 +933,6 @@
     "staticWebDir": "Static Web Directory"
   },
   "usersAndGroups": {
-    "title": "Users And Groups"
+    "title": "Users and Groups"
   }
 }

@@ -20,6 +20,7 @@ import com.streamsets.pipeline.api.ConfigDefBean;
 import com.streamsets.pipeline.api.FieldSelectorModel;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.ValueChooserModel;
+import com.streamsets.pipeline.api.credential.CredentialValue;
 import com.streamsets.pipeline.config.DataFormat;
 import com.streamsets.pipeline.kafka.api.KafkaOriginGroups;
 import com.streamsets.pipeline.lib.kafka.KafkaAutoOffsetReset;
@@ -249,9 +250,47 @@ public class KafkaConfigBean {
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       defaultValue = "false",
+      label = "Provide Keytab",
+      description = "Use a unique Kerberos keytab and principal for this stage to securely connect to Kafka through Kerberos. Overrides the default Kerberos keytab and principal configured for the Data Collector installation.",
+      displayPosition = 125,
+      group = "KAFKA"
+  )
+  public boolean provideKeytab;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.CREDENTIAL,
+      defaultValue = "",
+      label = "Keytab",
+      description = "Base64 encoded keytab to use for this stage. Paste the contents of the base64 encoded keytab, or use a credential function to retrieve the base64 encoded keytab from a credential store.",
+      displayPosition = 130,
+      dependsOn = "provideKeytab",
+      triggeredByValue = "true",
+      group = "KAFKA",
+      upload = ConfigDef.Upload.BASE64
+  )
+  public CredentialValue userKeytab;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.STRING,
+      defaultValue = "user/host@REALM",
+      label = "Principal",
+      description = "Kerberos service principal to use for this stage.",
+      displayPosition = 140,
+      dependsOn = "provideKeytab",
+      triggeredByValue = "true",
+      group = "KAFKA"
+  )
+  public String userPrincipal;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      defaultValue = "false",
       label = "Include Timestamps",
       description = "Includes the timestamps inherited from Kafka in the record header",
-      displayPosition = 130,
+      displayPosition = 150,
       group = "KAFKA"
   )
   public boolean timestampsEnabled;

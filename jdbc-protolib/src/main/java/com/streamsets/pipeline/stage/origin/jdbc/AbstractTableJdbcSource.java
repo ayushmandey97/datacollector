@@ -20,12 +20,13 @@ import com.google.common.base.Strings;
 import com.google.common.base.Throwables;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheLoader;
-import com.google.common.util.concurrent.RateLimiter;
 import com.streamsets.pipeline.api.PushSource;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.base.BasePushSource;
+import com.streamsets.pipeline.api.service.sshtunnel.SshTunnelService;
 import com.streamsets.pipeline.lib.executor.SafeScheduledExecutorService;
+import com.streamsets.pipeline.lib.jdbc.BasicConnectionString;
 import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
 import com.streamsets.pipeline.lib.jdbc.JdbcErrors;
 import com.streamsets.pipeline.lib.jdbc.JdbcUtil;
@@ -45,8 +46,9 @@ import com.streamsets.pipeline.lib.jdbc.multithread.TableReadContext;
 import com.streamsets.pipeline.lib.jdbc.multithread.TableRuntimeContext;
 import com.streamsets.pipeline.stage.origin.jdbc.cdc.sqlserver.SQLServerCDCSource;
 import com.streamsets.pipeline.stage.origin.jdbc.table.PartitioningMode;
-import com.streamsets.pipeline.stage.origin.jdbc.table.TableConfigBean;
+import com.streamsets.pipeline.stage.origin.jdbc.table.TableConfigBeanImpl;
 import com.streamsets.pipeline.stage.origin.jdbc.table.TableJdbcConfigBean;
+import com.streamsets.service.sshtunnel.DummySshService;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -97,6 +99,8 @@ public abstract class AbstractTableJdbcSource extends BasePushSource implements 
   private MultithreadedTableProvider tableOrderProvider;
   private int numberOfThreads;
 
+  private SshTunnelService sshTunnelService;
+
   protected JdbcUtil jdbcUtil;
   protected TableContextUtil tableContextUtil;
 
@@ -109,6 +113,10 @@ public abstract class AbstractTableJdbcSource extends BasePushSource implements 
       CommonSourceConfigBean commonSourceConfigBean,
       TableJdbcConfigBean tableJdbcConfigBean) {
     this(hikariConfigBean, commonSourceConfigBean, tableJdbcConfigBean, UtilsProvider.getTableContextUtil());
+  }
+
+  protected BasicConnectionString getBasicConnectionString() {
+    return new BasicConnectionString(hikariConfigBean.getPatterns(), hikariConfigBean.getConnectionStringTemplate());
   }
 
   public AbstractTableJdbcSource(
@@ -131,6 +139,27 @@ public abstract class AbstractTableJdbcSource extends BasePushSource implements 
   @Override
   protected List<Stage.ConfigIssue> init() {
     List<Stage.ConfigIssue> issues = new ArrayList<>();
+    sshTunnelService = getSSHService();
+    BasicConnectionString.Info
+        info
+        = getBasicConnectionString().getBasicConnectionInfo(hikariConfigBean.getConnectionString());
+
+    if (info != null) {
+      // basic connection string format
+      SshTunnelService.HostPort target = new SshTunnelService.HostPort(info.getHost(), info.getPort());
+      Map<SshTunnelService.HostPort, SshTunnelService.HostPort>
+          portMapping
+          = sshTunnelService.start(Collections.singletonList(target));
+      SshTunnelService.HostPort tunnel = portMapping.get(target);
+      info = info.changeHostPort(tunnel.getHost(), tunnel.getPort());
+      hikariConfigBean.setConnectionString(getBasicConnectionString().getBasicConnectionUrl(info));
+    } else {
+      // complex connection string format, we don't support this right now with SSH tunneling
+      issues.add(getContext().createConfigIssue("JDBC",
+          "hikariConfigBean.connectionString",
+          hikariConfigBean.getNonBasicUrlErrorCode()
+      ));
+    }
 
     PushSource.Context context = getContext();
     issues = hikariConfigBean.validateConfigs(context, issues);
@@ -143,6 +172,16 @@ public abstract class AbstractTableJdbcSource extends BasePushSource implements 
     }
 
     return issues;
+  }
+
+  private SshTunnelService getSSHService() {
+    SshTunnelService declaredSshTunnelService;
+    try {
+      declaredSshTunnelService = getContext().getService(SshTunnelService.class);
+    } catch (RuntimeException e) {
+      declaredSshTunnelService = new DummySshService();
+    }
+    return declaredSshTunnelService;
   }
 
   protected void checkConnectionAndBootstrap(Stage.Context context, List<ConfigIssue> issues) {
@@ -220,8 +259,8 @@ public abstract class AbstractTableJdbcSource extends BasePushSource implements 
    * @param issues
    * @param allTableContexts
    * @param qualifiedTableNameToTableConfigIndex the map from qualified table names to corresponding index of the
-   * {@link TableConfigBean} that leds  Once API-138 is complete, the index here can be consulted in order to set the precise list index of the
-   * {@link TableConfigBean} that resulted in the {@link TableContext} having the issue
+   * {@link TableConfigBeanImpl} that leds  Once API-138 is complete, the index here can be consulted in order to set the precise list index of the
+   * {@link TableConfigBeanImpl} that resulted in the {@link TableContext} having the issue
    * @return
    */
   private List<ConfigIssue> validatePartitioningConfigs(
@@ -346,7 +385,12 @@ public abstract class AbstractTableJdbcSource extends BasePushSource implements 
 
   @Override
   public void produce(Map<String, String> lastOffsets, int maxBatchSize) throws StageException {
+    sshTunnelService.healthCheck();
     int batchSize = Math.min(maxBatchSize, commonSourceConfigBean.maxBatchSize);
+    if (commonSourceConfigBean.maxBatchSize > maxBatchSize) {
+      getContext().reportError(JdbcErrors.JDBC_502, maxBatchSize);
+    }
+
     handleLastOffset(new HashMap<>(lastOffsets));
     try {
       executorService = new SafeScheduledExecutorService(numberOfThreads, TableJdbcRunnable.TABLE_JDBC_THREAD_PREFIX);
@@ -480,6 +524,9 @@ public abstract class AbstractTableJdbcSource extends BasePushSource implements 
 
   @Override
   public void destroy() {
+    if (sshTunnelService != null){
+      sshTunnelService.stop();
+    }
     boolean interrupted = shutdownExecutorIfNeeded();
     //Invalidate all the thread cache so that all statements/result sets are properly closed.
     toBeInvalidatedThreadCaches.forEach(Cache::invalidateAll);

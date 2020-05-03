@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 StreamSets Inc.
+ * Copyright 2020 StreamSets Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -133,7 +133,6 @@ module.exports = function(grunt) {
       ],
       css: [
         'bower_components/bootstrap/dist/css/bootstrap.min.css',
-        'bower_components/json-formatter/dist/json-formatter.min.css.css',
         'bower_components/fontawesome/css/font-awesome.css',
         'bower_components/nvd3/build/nv.d3.css',
         'bower_components/angular-ui-select/dist/select.css',
@@ -187,7 +186,7 @@ module.exports = function(grunt) {
         ' * <%= pkg.name %> - v<%= pkg.version %> - <%= buildTime %>\n' +
         ' * <%= pkg.homepage %>\n' +
         ' *\n' +
-        ' * Copyright 2017 StreamSets Inc.\n' +
+        ' * Copyright 2020 StreamSets Inc.\n' +
         ' *\n' +
         ' * Licensed under the Apache License, Version 2.0 (the "License");\n' +
         ' * you may not use this file except in compliance with the License.\n' +
@@ -439,7 +438,7 @@ module.exports = function(grunt) {
         sub: true,
         boss: true,
         eqnull: true,
-        esnext: true,
+        esversion: 5,
         debug: false,
         loopfunc: true,
         reporterOutput: ""
@@ -603,6 +602,7 @@ module.exports = function(grunt) {
         files: [
           '<%= base_dir %>index.html',
           '<%= common_base_dir %>login.html',
+          '<%= common_base_dir %>resetPassword.html',
           '<%= common_base_dir %>disconnected-login.html'
         ],
         tasks: [ 'index:build', 'login:build' ]
@@ -796,6 +796,16 @@ module.exports = function(grunt) {
           data: {
             scripts: jsFiles,
             styles: cssFiles,
+            version: grunt.config( 'pkg.version' )
+          }
+        });
+      }
+    });
+
+    grunt.file.copy(grunt.config( 'common_base_dir' ) +'resetPassword.html', grunt.config( 'build_dir' ) + '/resetPassword.html', {
+      process: function ( contents, path ) {
+        return grunt.template.process( contents, {
+          data: {
             version: grunt.config( 'pkg.version' )
           }
         });

@@ -23,12 +23,12 @@
   <parent>
     <groupId>com.streamsets</groupId>
     <artifactId>streamsets-datacollector-stage-lib-parent</artifactId>
-    <version>3.15.0-SNAPSHOT</version>
+    <version>3.16.0-SNAPSHOT</version>
     <relativePath>../stage-lib-parent</relativePath>
   </parent>
   <groupId>com.streamsets</groupId>
   <artifactId>streamsets-datacollector-cdh_5_4-lib</artifactId>
-  <version>3.15.0-SNAPSHOT</version>
+  <version>3.16.0-SNAPSHOT</version>
   <description>StreamSets Data Collector CDH 5.4.11 Lib</description>
   <name>StreamSets Data Collector CDH 5.4.11 Lib</name>
   <packaging>jar</packaging>
@@ -44,19 +44,9 @@
     <avro.version>1.7.7</avro.version>
     <jackson.version>2.2.3</jackson.version>
     <netty.version>4.0.23.Final</netty.version>
-    <parquet.version>1.8.1</parquet.version>
   </properties>
 
   <dependencies>
-    <!-- Parquet dependency must be here. Otherwise tests are run with incorrect parquet version taken from
-        MapReduce Protolib-->
-
-    <dependency>
-      <groupId>org.apache.parquet</groupId>
-      <artifactId>parquet-avro</artifactId>
-      <version>${parquet.version}</version>
-      <scope>compile</scope>
-    </dependency>
 
     <!--Dependency for Solr Unit Tests to override SDC Jetty Artifacts -->
     <dependency>

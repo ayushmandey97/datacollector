@@ -15,6 +15,7 @@
  */
 package com.streamsets.pipeline.lib.jdbc.multithread.util;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
@@ -69,9 +70,12 @@ public final class OffsetQueryUtil {
   private static final String ORDER_BY_CLAUSE = " ORDER by %s ";
   private static final String PREPARED_STATEMENT_POSITIONAL_PARAMETER = "?";
 
-
-  private static final Joiner OFFSET_COLUMN_JOINER = Joiner.on("::");
-  private static final Splitter OFFSET_COLUMN_SPLITTER = Splitter.on("::");
+  private static final String OFFSET_COLUMN_SEPARATOR = "::";
+  private static final String OFFSET_COLUMN_SEPARATOR_ESCAPE = "__";
+  private static final String OFFSET_COLUMN_SEPARATOR_ESCAPE_REPLACEMENT = "___";
+  private static final String OFFSET_COLUMN_SEPARATOR_REPLACEMENT = "__:";
+  private static final Joiner OFFSET_COLUMN_JOINER = Joiner.on(OFFSET_COLUMN_SEPARATOR);
+  private static final Splitter OFFSET_COLUMN_SPLITTER = Splitter.on(OFFSET_COLUMN_SEPARATOR);
 
   private static final String OFFSET_KEY_COLUMN_SEPARATOR = ",";
   public static final String OFFSET_KEY_COLUMN_NAME_VALUE_SEPARATOR = "=";
@@ -174,29 +178,21 @@ public final class OffsetQueryUtil {
     Map<String, String> storedTableToOffset = getColumnsToOffsetMapFromOffsetFormat(lastOffset);
     final boolean noStoredOffsets = storedTableToOffset.isEmpty();
 
-    //Determines whether an initial offset is specified in the config and there is no stored offset.
-    boolean isOffsetOverriden = tableContext.isOffsetOverriden() && noStoredOffsets;
-
     OffsetComparison minComparison = OffsetComparison.GREATER_THAN;
     Map<String, String> offset = null;
-    if (isOffsetOverriden) {
-      //Use the offset in the configuration
-      offset = tableContext.getOffsetColumnToStartOffset();
-    } else if (tableRuntimeContext.isPartitioned() && noStoredOffsets) {
-      // use partitioned starting offsets
-      offset = tableRuntimeContext.getStartingPartitionOffsets();
-      minComparison = OffsetComparison.GREATER_THAN_OR_EQUALS;
+
+    if (noStoredOffsets) {
+      offset = tableRuntimeContext.getPartitionOffsetStart();
+      if (tableRuntimeContext.isPartitioned()) {
+        minComparison = OffsetComparison.GREATER_THAN_OR_EQUALS;
+      }
     } else {
-      // if offset is available
-      // get the stored offset (which is of the form partitionName=value) and strip off 'offsetColumns=' prefix
-      // else null
-      // offset = storedOffsets;
       offset = storedTableToOffset;
     }
 
     Map<String, String> maxOffsets = new HashMap<>();
     if (tableRuntimeContext.isPartitioned()) {
-      maxOffsets.putAll(tableRuntimeContext.getMaxPartitionOffsets());
+      maxOffsets.putAll(tableRuntimeContext.getPartitionOffsetEnd());
     }
 
     List<String> finalAndConditions = new ArrayList<>();
@@ -332,8 +328,8 @@ public final class OffsetQueryUtil {
     if (StringUtils.isNotBlank(lastOffset)) {
       Iterator<String> offsetColumnsAndOffsetIterator = OFFSET_COLUMN_SPLITTER.split(lastOffset).iterator();
       while (offsetColumnsAndOffsetIterator.hasNext()) {
-        String offsetColumnAndOffset = offsetColumnsAndOffsetIterator.next();
-        String[] offsetColumnOffsetSplit = offsetColumnAndOffset.split("=");
+        String offsetColumnAndOffset = unescapeOffsetValue(offsetColumnsAndOffsetIterator.next());
+        String[] offsetColumnOffsetSplit = offsetColumnAndOffset.split("=", 2);
         String offsetColumn = offsetColumnOffsetSplit[0];
         String offset = offsetColumnOffsetSplit[1];
         offsetColumnsToOffsetMap.put(offsetColumn, offset);
@@ -342,10 +338,26 @@ public final class OffsetQueryUtil {
     return offsetColumnsToOffsetMap;
   }
 
+  /**
+   * Remove problematical character :: from the data so that it can be used as a separate (escape it).
+   */
+  @VisibleForTesting
+  static String escapeOffsetValue(String offset) {
+    return offset.replaceAll(OFFSET_COLUMN_SEPARATOR_ESCAPE, OFFSET_COLUMN_SEPARATOR_ESCAPE_REPLACEMENT).replaceAll(OFFSET_COLUMN_SEPARATOR, OFFSET_COLUMN_SEPARATOR_REPLACEMENT);
+  }
+
+  /**
+   * Put back problematical character :: into the data so that we can retrieve original value
+   */
+  @VisibleForTesting
+  static String unescapeOffsetValue(String offset) {
+    return offset.replaceAll(OFFSET_COLUMN_SEPARATOR_REPLACEMENT, OFFSET_COLUMN_SEPARATOR).replaceAll(OFFSET_COLUMN_SEPARATOR_ESCAPE_REPLACEMENT, OFFSET_COLUMN_SEPARATOR_ESCAPE);
+  }
+
   public static String getOffsetFormat(Map<String, ?> columnsToOffsets) {
     List<String> offsetColumnFormat = new ArrayList<>();
     if (columnsToOffsets != null) {
-      columnsToOffsets.forEach((col, off) -> offsetColumnFormat.add(String.format(OFFSET_COLUMN_NAME_VALUE, col, off)));
+      columnsToOffsets.forEach((col, off) -> offsetColumnFormat.add(escapeOffsetValue(String.format(OFFSET_COLUMN_NAME_VALUE, col, off))));
     }
     return OFFSET_COLUMN_JOINER.join(offsetColumnFormat);
   }

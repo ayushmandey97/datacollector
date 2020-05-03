@@ -15,13 +15,21 @@
  */
 package com.streamsets.datacollector.usagestats;
 
+import org.jetbrains.annotations.NotNull;
+
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 // stats bean that is send back to StreamSets.
 public class StatsBean {
+  private String sdcId;
+  private String productName;
   private String version;
   private String dataCollectorVersion;
+  private String buildRepoSha;
+  private Map<String, Object> extraInfo;
   private boolean dpmEnabled;
   private long startTime;
   private long endTime;
@@ -31,15 +39,21 @@ public class StatsBean {
   private Map<String, Long> stageMilliseconds;
   private long recordsOM;
   private Map<String, Long> errorCodes;
+  private List<FirstPipelineUse> createToPreview;
+  private List<FirstPipelineUse> createToRun;
 
   public StatsBean() {
     stageMilliseconds = new HashMap<>();
   }
 
-  public StatsBean(ActiveStats activeStats) {
+  public StatsBean(String sdcId, ActiveStats activeStats) {
     this();
+    setSdcId(sdcId);
+    setProductName(activeStats.getProductName());
     setVersion(activeStats.getVersion());
     setDataCollectorVersion(activeStats.getDataCollectorVersion());
+    setBuildRepoSha(activeStats.getBuildRepoSha());
+    setExtraInfo(activeStats.getExtraInfo());
     setDpmEnabled(activeStats.isDpmEnabled());
     setStartTime(activeStats.getStartTime());
     setEndTime(activeStats.getEndTime());
@@ -59,6 +73,33 @@ public class StatsBean {
       setRecordsOM(-1); // no records
     }
     setErrorCodes(new HashMap<>(activeStats.getErrorCodes()));
+    createToPreview = getFirstUse(activeStats.getCreateToPreview());
+    createToRun = getFirstUse(activeStats.getCreateToRun());
+  }
+
+  @NotNull
+  List<FirstPipelineUse> getFirstUse(Map<String, FirstPipelineUse> map) {
+    return map.entrySet()
+        .stream()
+        .filter(e -> e.getValue().getFirstUseOn() > 0)
+        .map(e -> e.getValue())
+        .collect(Collectors.toList());
+  }
+
+  public String getSdcId() {
+    return sdcId;
+  }
+
+  public StatsBean setSdcId(String sdcId) {
+    this.sdcId = sdcId;
+    return this;
+  }
+
+  public String getProductName() { return productName; }
+
+  public StatsBean setProductName(String productName) {
+    this.productName = productName;
+    return this;
   }
 
   public String getVersion() {
@@ -75,6 +116,24 @@ public class StatsBean {
 
   public void setDataCollectorVersion(String version) {
     this.dataCollectorVersion = version;
+  }
+
+  public String getBuildRepoSha() {
+    return buildRepoSha;
+  }
+
+  public StatsBean setBuildRepoSha(String buildRepoSha) {
+    this.buildRepoSha = buildRepoSha;
+    return this;
+  }
+
+  public Map<String, Object> getExtraInfo() {
+    return extraInfo;
+  }
+
+  public StatsBean setExtraInfo(Map<String, Object> extraInfo) {
+    this.extraInfo = extraInfo;
+    return this;
   }
 
   public boolean isDpmEnabled() {
@@ -147,5 +206,23 @@ public class StatsBean {
 
   public void setErrorCodes(Map<String, Long> errorCodes) {
     this.errorCodes = errorCodes;
+  }
+
+  public List<FirstPipelineUse> getCreateToPreview() {
+    return createToPreview;
+  }
+
+  public StatsBean setCreateToPreview(List<FirstPipelineUse> createToPreview) {
+    this.createToPreview = createToPreview;
+    return this;
+  }
+
+  public List<FirstPipelineUse> getCreateToRun() {
+    return createToRun;
+  }
+
+  public StatsBean setCreateToRun(List<FirstPipelineUse> createToRun) {
+    this.createToRun = createToRun;
+    return this;
   }
 }

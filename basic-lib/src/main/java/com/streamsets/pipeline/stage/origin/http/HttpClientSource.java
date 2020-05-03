@@ -58,8 +58,10 @@ import javax.ws.rs.core.Link;
 import javax.ws.rs.core.MultivaluedHashMap;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
 import java.time.ZoneId;
@@ -74,8 +76,10 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static com.streamsets.pipeline.lib.http.Errors.HTTP_21;
+import static com.streamsets.pipeline.lib.http.Errors.HTTP_66;
 import static com.streamsets.pipeline.lib.parser.json.Errors.JSON_PARSER_00;
 
 /**
@@ -100,6 +104,7 @@ public class HttpClientSource extends BaseSource {
   private static final String BASIC_CONFIG_PREFIX = "conf.basic.";
   private static final String VAULT_EL_PREFIX = VaultEL.PREFIX + ":";
   private static final HashFunction HF = Hashing.sha256();
+  private static final String REQUEST_STATUS_CONFIG_NAME = "HTTP-Status";
 
   private final HttpClientConfigBean conf;
   private Hasher hasher;
@@ -138,6 +143,8 @@ public class HttpClientSource extends BaseSource {
 
   private int lastStatus = 0;
   private int retryCount = 0;
+
+  private boolean checkBatchSize = true;
 
   private Map<Integer, HttpResponseActionConfigBean> statusToActionConfigs = new HashMap<>();
   private HttpResponseActionConfigBean timeoutActionConfig;
@@ -282,6 +289,11 @@ public class HttpClientSource extends BaseSource {
   public String produce(String lastSourceOffset, int maxBatchSize, BatchMaker batchMaker) throws StageException {
     long start = System.currentTimeMillis();
     int chunksToFetch = Math.min(conf.basic.maxBatchSize, maxBatchSize);
+    if (checkBatchSize && conf.basic.maxBatchSize > maxBatchSize) {
+      getContext().reportError(Errors.HTTP_35, maxBatchSize);
+      checkBatchSize = false;
+    }
+
     Optional<String> newSourceOffset = Optional.empty();
     recordCount = 0;
 
@@ -506,7 +518,7 @@ public class HttpClientSource extends BaseSource {
             ),
           e);
           Throwable reportEx = cause != null ? cause : e;
-          final StageException stageException = new StageException(Errors.HTTP_32, reportEx.toString(), reportEx);
+          final StageException stageException = new StageException(Errors.HTTP_32, getResponseStatus(), reportEx.toString(), reportEx);
           LOG.error(stageException.getMessage());
           throw stageException;
         }
@@ -620,6 +632,7 @@ public class HttpClientSource extends BaseSource {
         if (record == null) {
           break;
         }
+        record.getHeader().setAttribute(REQUEST_STATUS_CONFIG_NAME, String.format("%d",getResponse().getStatus()));
 
         // LINK_FIELD pagination
         if (conf.pagination.mode == PaginationMode.LINK_FIELD) {
@@ -628,6 +641,9 @@ public class HttpClientSource extends BaseSource {
           haveMorePages = !stopEval.eval(stopVars, conf.pagination.stopCondition, Boolean.class);
           if (haveMorePages) {
             final String nextPageURLPrefix = StringUtils.isNotBlank(conf.pagination.nextPageURLPrefix) ? conf.pagination.nextPageURLPrefix : "";
+            if(!record.has(conf.pagination.nextPageFieldPath)){
+              throw new StageException(HTTP_66, getResponseStatus(), conf.pagination.nextPageFieldPath);
+            }
             final String nextPageFieldValue = record.get(conf.pagination.nextPageFieldPath).getValueAsString();
             final String nextPageURL = nextPageFieldValue.startsWith(nextPageURLPrefix) ? nextPageFieldValue : nextPageURLPrefix.concat(nextPageFieldValue);
             next = Link.fromUri(nextPageURL).build();
@@ -648,8 +664,8 @@ public class HttpClientSource extends BaseSource {
       } while (recordCount < maxRecords && !waitTimeExpired(start));
 
     } catch (IOException e) {
-      LOG.error(Errors.HTTP_00.getMessage(), e.toString(), e);
-      errorRecordHandler.onError(Errors.HTTP_00, e.toString(), e);
+      LOG.error(Errors.HTTP_00.getMessage(), getResponseStatus(), e.toString(), e);
+      errorRecordHandler.onError(Errors.HTTP_00, getResponseStatus(), e.toString(), e);
 
     } finally {
       try {
@@ -660,8 +676,8 @@ public class HttpClientSource extends BaseSource {
           incrementSourceOffset(sourceOffset, subRecordCount);
         }
       } catch(IOException e) {
-        LOG.warn(Errors.HTTP_28.getMessage(), e.toString(), e);
-        errorRecordHandler.onError(Errors.HTTP_28, e.toString(), e);
+        LOG.warn(Errors.HTTP_28.getMessage(), getResponseStatus(), e.toString(), e);
+        errorRecordHandler.onError(Errors.HTTP_28, getResponseStatus(), e.toString(), e);
       }
     }
 
@@ -671,6 +687,13 @@ public class HttpClientSource extends BaseSource {
   @VisibleForTesting
   Response getResponse() {
     return response;
+  }
+
+  String getResponseStatus(){
+    if(getResponse() == null){
+      return "NULL";
+    }
+    return String.format("%d",getResponse().getStatus());
   }
 
   @VisibleForTesting
@@ -790,14 +813,14 @@ public class HttpClientSource extends BaseSource {
     int numSubRecords = 0;
 
     if (!record.has(conf.pagination.resultFieldPath)) {
-      final StageException stageException = new StageException(Errors.HTTP_12, conf.pagination.resultFieldPath);
+      final StageException stageException = new StageException(Errors.HTTP_12, getResponseStatus(), conf.pagination.resultFieldPath);
       LOG.error(stageException.getMessage());
       throw stageException;
     }
     Field resultField = record.get(conf.pagination.resultFieldPath);
 
     if (resultField.getType() != Field.Type.LIST) {
-      final StageException stageException = new StageException(Errors.HTTP_08, resultField.getType());
+      final StageException stageException = new StageException(Errors.HTTP_08, getResponseStatus(), resultField.getType());
       LOG.error(stageException.getMessage());
       throw stageException;
     }
@@ -900,13 +923,25 @@ public class HttpClientSource extends BaseSource {
       lastRequestCompletedTime = System.currentTimeMillis();
       String reason = getResponse().getStatusInfo().getReasonPhrase();
       String respString = getResponse().readEntity(String.class);
-      getResponse().close();
-      setResponse(null);
-
 
       final String errorMsg = reason + " : " + respString;
       LOG.warn(Errors.HTTP_01.getMessage(), status, errorMsg);
-      errorRecordHandler.onError(Errors.HTTP_01, status, errorMsg);
+
+      if(conf.propagateAllHttpResponses){
+        Map<String,Field> mapFields = new HashMap<>();
+        mapFields.put(conf.errorResponseField,Field.create(respString));
+        Record r = getContext().createRecord("");
+        r.set(Field.create(mapFields));
+        addResponseHeaders(r.getHeader());
+        r.getHeader().setAttribute(REQUEST_STATUS_CONFIG_NAME, String.format("%d",getResponse().getStatus()));
+        batchMaker.addRecord(r);
+      }else{
+        errorRecordHandler.onError(Errors.HTTP_01, status, errorMsg);
+      }
+
+      getResponse().close();
+      setResponse(null);
+
 
       return newSourceOffset;
     }

@@ -16,9 +16,42 @@
 package com.streamsets.pipeline.lib.salesforce;
 
 import com.streamsets.pipeline.api.ConfigDef;
+import com.streamsets.pipeline.api.ConfigDefBean;
+import com.streamsets.pipeline.api.Dependency;
 import com.streamsets.pipeline.api.ValueChooserModel;
 
+/**
+ Common to origin and lookup processor
+ */
 public class ForceInputConfigBean extends ForceConfigBean {
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      defaultValue = "true",
+      label = "Query Existing Data",
+      description = "If enabled, existing data will be read from Force.com.",
+      displayPosition = 70,
+      group = "FORCE"
+  )
+  public boolean queryExistingData;
+
+  @ConfigDefBean(groups = {"QUERY"})
+  public ForceBulkConfigBean bulkConfig = new ForceBulkConfigBean();
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      label = "Include Deleted Records",
+      description = "When enabled, the processor will additionally retrieve deleted records from the Recycle Bin",
+      defaultValue = "false",
+      displayPosition = 82,
+      dependencies = {
+          @Dependency(configName = "queryExistingData", triggeredByValues = "true"),
+      },
+      group = "QUERY"
+  )
+  public boolean queryAll = false;
+
   @ConfigDef(
       required = true,
       type = ConfigDef.Type.BOOLEAN,

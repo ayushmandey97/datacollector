@@ -19,7 +19,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.streamsets</groupId>
   <artifactId>streamsets-datacollector</artifactId>
-  <version>3.15.0-SNAPSHOT</version>
+  <version>3.16.0-SNAPSHOT</version>
   <description>StreamSets Data Collector</description>
   <name>StreamSets Data Collector</name>
   <packaging>pom</packaging>
@@ -81,19 +81,23 @@
     <kinesis-lib>kinesis-lib</kinesis-lib>
     <mleap-lib>mleap-lib</mleap-lib>
     <mysql-binlog-lib>mysql-binlog-lib</mysql-binlog-lib>
+    <mysql-lib>mysql-lib</mysql-lib>
     <omniture-lib>omniture-lib</omniture-lib>
+    <oracle-lib>oracle-lib</oracle-lib>
     <orchestrator-lib>orchestrator-lib</orchestrator-lib>
+    <postgresql-lib>postgresql-lib</postgresql-lib>
     <rabbitmq-lib>rabbitmq-lib</rabbitmq-lib>
     <redis-lib>redis-lib</redis-lib>
     <salesforce-lib>salesforce-lib</salesforce-lib>
+    <sqlserver-lib>sqlserver-lib</sqlserver-lib>
     <stats-lib>stats-lib</stats-lib>
     <tensorflow-lib>tensorflow-lib</tensorflow-lib>
     <vault-credentialstore-lib>vault-credentialstore-lib</vault-credentialstore-lib>
     <wholefile-transformer-lib>wholefile-transformer-lib</wholefile-transformer-lib>
     <windows-lib>windows-lib</windows-lib>
     <rootProject>true</rootProject>
-    <datacollector-api.version>3.15.0-SNAPSHOT</datacollector-api.version>
-    <datacollector-spark-api.version>3.15.0-SNAPSHOT</datacollector-spark-api.version>
+    <datacollector-api.version>3.16.0-SNAPSHOT</datacollector-api.version>
+    <datacollector-spark-api.version>3.16.0-SNAPSHOT</datacollector-spark-api.version>
     <thycotic-credentialstore-lib>thycotic-credentialstore-lib</thycotic-credentialstore-lib>
   </properties>
 
@@ -260,11 +264,15 @@
     <module>kinesis-lib</module>
     <module>mleap-lib</module>
     <module>mysql-binlog-lib</module>
+    <module>mysql-lib</module>
     <module>omniture-lib</module>
+    <module>oracle-lib</module>
     <module>orchestrator-lib</module>
+    <module>postgresql-lib</module>
     <module>rabbitmq-lib</module>
     <module>redis-lib</module>
     <module>salesforce-lib</module>
+    <module>sqlserver-lib</module>
     <module>stats-lib</module>
     <module>tensorflow-lib</module>
     <module>vault-credentialstore-lib</module>
@@ -272,6 +280,7 @@
     <module>windows-lib</module>
     <module>pulsar-protolib</module>
     <module>thycotic-credentialstore-lib</module>
+    <module>google-cloud-support</module>
   </modules>
 
   <build>
@@ -568,16 +577,13 @@
         <kinetica_6_1-lib>kinetica_6_1-lib</kinetica_6_1-lib>
         <kinetica_6_2-lib>kinetica_6_2-lib</kinetica_6_2-lib>
         <kinetica_7_0-lib>kinetica_7_0-lib</kinetica_7_0-lib>
-        <mapr_5_0-lib>mapr_5_0-lib</mapr_5_0-lib>
-        <mapr_5_1-lib>mapr_5_1-lib</mapr_5_1-lib>
-        <mapr_5_2-lib>mapr_5_2-lib</mapr_5_2-lib>
         <mapr_6_0-lib>mapr_6_0-lib</mapr_6_0-lib>
         <mapr_6_0-mep4-lib>mapr_6_0-mep4-lib</mapr_6_0-mep4-lib>
         <mapr_6_0-mep5-lib>mapr_6_0-mep5-lib</mapr_6_0-mep5-lib>
         <mapr_6_1-lib>mapr_6_1-lib</mapr_6_1-lib>
         <mapr_6_1-mep6-lib>mapr_6_1-mep6-lib</mapr_6_1-mep6-lib>
-        <mapr_spark_2_1_mep_3_0-lib>mapr_spark_2_1_mep_3_0-lib</mapr_spark_2_1_mep_3_0-lib>
         <mongodb_3-lib>mongodb_3-lib</mongodb_3-lib>
+        <mongodb_4-lib>mongodb_4-lib</mongodb_4-lib>
         <databricks-ml_2-lib>databricks-ml_2-lib</databricks-ml_2-lib>
       </properties>
       <modules>
@@ -658,16 +664,13 @@
         <module>hdp_2_6-flume-lib</module>
         <module>hdp_3_1-lib</module>
         <module>jython_2_7-lib</module>
-        <module>mapr_5_0-lib</module>
-        <module>mapr_5_1-lib</module>
-        <module>mapr_5_2-lib</module>
         <module>mapr_6_0-lib</module>
         <module>mapr_6_0-mep4-lib</module>
         <module>mapr_6_0-mep5-lib</module>
         <module>mapr_6_1-lib</module>
         <module>mapr_6_1-mep6-lib</module>
-        <module>mapr_spark_2_1_mep_3_0-lib</module>
         <module>mongodb_3-lib</module>
+        <module>mongodb_4-lib</module>
         <module>databricks-ml_2-lib</module>
       </modules>
     </profile>
@@ -711,8 +714,7 @@
         <kinetica_7_0-lib>kinetica_7_0-lib</kinetica_7_0-lib>
         <mapr_6_1-lib>mapr_6_1-lib</mapr_6_1-lib>
         <mapr_6_1-mep6-lib>mapr_6_1-mep6-lib</mapr_6_1-mep6-lib>
-        <mapr_spark_2_1_mep_3_0-lib>mapr_spark_2_1_mep_3_0-lib</mapr_spark_2_1_mep_3_0-lib>
-        <mongodb_3-lib>mongodb_3-lib</mongodb_3-lib>
+        <mongodb_4-lib>mongodb_4-lib</mongodb_4-lib>
         <azure-lib>azure_lib</azure-lib>
         <databricks-ml_2-lib>databricks-ml_2-lib</databricks-ml_2-lib>
       </properties>
@@ -747,8 +749,7 @@
         <module>jython_2_7-lib</module>
         <module>mapr_6_1-lib</module>
         <module>mapr_6_1-mep6-lib</module>
-        <module>mapr_spark_2_1_mep_3_0-lib</module>
-        <module>mongodb_3-lib</module>
+        <module>mongodb_4-lib</module>
         <module>databricks-ml_2-lib</module>
       </modules>
     </profile>

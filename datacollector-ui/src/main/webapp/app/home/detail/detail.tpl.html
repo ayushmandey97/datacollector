@@ -35,10 +35,28 @@
              ng-click="changeStageSelection({selectedObject: stageInstance, type: pipelineConstant.STAGE_INSTANCE})">{{stageInstance.uiInfo.label}}</a>
         </li>
       </ul>
+      <div class="checkbox advanced-options-select"
+        ng-if="selectedType == pipelineConstant.STAGE_INSTANCE
+        && detailPaneConfigDefn
+        && hasAdvancedConfig(detailPaneConfigDefn.configDefinitions)">
+        <label
+          ng-class="{'advanced-issue': configHasAdvancedIssues}"
+          tooltip="{{configHasAdvancedIssues ? ('home.detailPane.advancedIssuesNeedFix' | translate) : ''}}">
+          <input
+            type="checkbox"
+            name="showAdvanced"
+            ng-model="detailPaneConfig.uiInfo.displayMode"
+            ng-true-value="'{{pipelineConstant.DISPLAY_MODE_ADVANCED}}'"
+            ng-false-value="'{{pipelineConstant.DISPLAY_MODE_BASIC}}'"
+            ng-disabled="configHasAdvancedIssues">
+            Show Advanced Options
+          </input>
+        </label>
+      </div>
     </div>
 
 
-    <div class="pull-right size-toolbar">
+    <div class="pull-right size-toolbar fs-unmask">
 
       <div class="btn-group pull-left detail-settings-dropdown"
            ng-if="!$storage.dontShowRESTResponseMenu || isPipelineRunning">
@@ -144,7 +162,7 @@
     <tabset class="detail-tabs-left tabs-left" ng-if="detailPaneConfigDefn">
       <tab ng-repeat="tab in detailPaneTabs track by $index" active="tab.active" disable="tab.disabled"
            select="onTabSelect(tab)">
-        <tab-heading>  <!--tooltip-placement="right" tooltip="{{tab.label}}" -->
+        <tab-heading class="fs-unmask">  <!--tooltip-placement="right" tooltip="{{tab.label}}" -->
           <i class="fa fa-exclamation-triangle icon-danger"
              ng-show="showWarning(tab)"></i>
 

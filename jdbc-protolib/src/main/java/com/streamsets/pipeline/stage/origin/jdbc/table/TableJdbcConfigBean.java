@@ -33,6 +33,7 @@ import java.util.List;
 
 public class TableJdbcConfigBean {
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.MODEL,
       label = "Table Configs",
@@ -40,9 +41,10 @@ public class TableJdbcConfigBean {
       group = "TABLE"
   )
   @ListBeanModel
-  public List<TableConfigBean> tableConfigs;
+  public List<TableConfigBeanImpl> tableConfigs;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       defaultValue = "1",
@@ -55,6 +57,7 @@ public class TableJdbcConfigBean {
   public int numberOfThreads;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.MODEL,
       defaultValue = "SWITCH_TABLES",
@@ -67,6 +70,7 @@ public class TableJdbcConfigBean {
   public BatchTableStrategy batchTableStrategy;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       defaultValue = "-1",
@@ -83,6 +87,7 @@ public class TableJdbcConfigBean {
   public int numberOfBatchesFromRs;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       defaultValue = "-1",
@@ -98,6 +103,7 @@ public class TableJdbcConfigBean {
   public int resultCacheSize;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.MODEL,
       defaultValue = "UTC",
@@ -110,6 +116,7 @@ public class TableJdbcConfigBean {
   public String timeZoneID;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.MODEL,
       defaultValue = "NONE",
@@ -122,6 +129,7 @@ public class TableJdbcConfigBean {
   public QuoteChar quoteChar;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.MODEL,
       defaultValue = "NONE",
@@ -134,18 +142,32 @@ public class TableJdbcConfigBean {
   public TableOrderStrategy tableOrderStrategy;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
+      required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      label = "Create JDBC Header Attributes",
+      description = "Generates record header attributes that provide additional details about source data, such as the original data type or source table name.",
+      defaultValue = "true",
+      displayPosition = 220,
+      group = "ADVANCED"
+  )
+  public boolean createJDBCHeaders = true;
+
+  @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.MODEL,
       label = "On Unknown Type",
       description = "Action that should be performed when an unknown type is detected in the result set.",
       defaultValue = "STOP_PIPELINE",
-      displayPosition = 220,
+      displayPosition = 230,
       group = "ADVANCED"
   )
   @ValueChooserModel(UnknownTypeActionChooserValues.class)
   public UnknownTypeAction unknownTypeAction = UnknownTypeAction.STOP_PIPELINE;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       defaultValue = "1000",
@@ -163,7 +185,7 @@ public class TableJdbcConfigBean {
   public static final String QUOTE_CHAR = "quoteChar";
 
   public List<Stage.ConfigIssue> validateConfigs(PushSource.Context context, List<Stage.ConfigIssue> issues) {
-    if (tableConfigs.isEmpty()) {
+    if (getTableConfigs().isEmpty()) {
       issues.add(context.createConfigIssue(Groups.TABLE.name(), TABLE_CONFIG, JdbcErrors.JDBC_66));
     }
     if (batchTableStrategy == BatchTableStrategy.SWITCH_TABLES && numberOfBatchesFromRs == 0) {
@@ -176,5 +198,9 @@ public class TableJdbcConfigBean {
       );
     }
     return issues;
+  }
+
+  public List<? extends TableConfigBean> getTableConfigs() {
+    return tableConfigs;
   }
 }

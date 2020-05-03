@@ -29,6 +29,7 @@ public class TestStartJobProcessor {
   @Test
   public void testEmptyJobId() throws StageException {
     Processor startJobProcessor = new TestStartJobProcessorBuilder()
+        .taskName("task1")
         .baseUrl("http://invalidHost:18631")
         .jobIdConfig("", "{}")
         .build();

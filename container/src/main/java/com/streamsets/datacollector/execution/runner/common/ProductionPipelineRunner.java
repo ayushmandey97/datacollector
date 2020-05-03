@@ -384,6 +384,7 @@ public class ProductionPipelineRunner implements PipelineRunner, PushSourceConte
     this.running = true;
 
     try {
+      LOG.debug("Staring pipeline with offset: {}", offsetTracker.getOffsets());
       if (originPipe.getStage().getStage() instanceof PushSource) {
         runPushSource();
       } else {
@@ -640,7 +641,7 @@ public class ProductionPipelineRunner implements PipelineRunner, PushSourceConte
       listeners.add((ErrorListener) originPipe.getStage().getStage());
     }
     for(PipeRunner pipeRunner : pipes) {
-      pipeRunner.forEach(pipe -> {
+      pipeRunner.forEach("", pipe -> {
         Stage stage = pipe.getStage().getStage();
         if (stage instanceof ErrorListener) {
           listeners.add((ErrorListener) stage);

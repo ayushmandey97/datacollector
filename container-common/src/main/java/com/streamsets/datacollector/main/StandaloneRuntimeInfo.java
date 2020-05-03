@@ -18,6 +18,7 @@ package com.streamsets.datacollector.main;
 import com.codahale.metrics.MetricRegistry;
 import com.fasterxml.uuid.Generators;
 import com.google.common.io.Files;
+import com.streamsets.datacollector.security.usermgnt.TrxUsersManager;
 import com.streamsets.pipeline.api.impl.Utils;
 
 import java.io.File;
@@ -60,6 +61,17 @@ public class StandaloneRuntimeInfo extends RuntimeInfo {
         return StandaloneRuntimeInfo.this.id;
       }
     });
+
+    // to force a completion or rollback of an incomplete user management operation
+    File usersFile = new File(getConfigDir(), "/form-realm.properties");
+    File[] files = usersFile.getParentFile().listFiles((dir, name) -> name.startsWith("form-realm.properties"));
+    if (files != null && files.length > 0) {
+      try {
+        new TrxUsersManager(usersFile);
+      } catch (IOException ex) {
+        throw new RuntimeException(ex);
+      }
+    }
   }
 
   @Override
@@ -110,5 +122,9 @@ public class StandaloneRuntimeInfo extends RuntimeInfo {
   @Override
   public boolean isClusterSlave() {
     return false;
+  }
+
+  public void setBaseDir(File baseDir) {
+    this.baseDir = baseDir;
   }
 }

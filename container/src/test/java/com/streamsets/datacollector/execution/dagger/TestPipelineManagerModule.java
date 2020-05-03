@@ -30,6 +30,7 @@ import com.streamsets.datacollector.main.PipelineTask;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.main.RuntimeModule;
 import com.streamsets.datacollector.main.SlavePipelineTask;
+import com.streamsets.datacollector.main.SlaveRuntimeInfo;
 import com.streamsets.datacollector.store.PipelineStoreTask;
 import com.streamsets.datacollector.store.impl.SlavePipelineStoreTask;
 import com.streamsets.datacollector.task.TaskWrapper;
@@ -100,7 +101,7 @@ public class TestPipelineManagerModule {
     ((StandaloneAndClusterPipelineManager)pipelineManager).outputRetrieved(previewer.getId());
     assertNull(pipelineManager.getPreviewer(previewer.getId()));
 
-    pipelineStoreTask.save("user", pc.getInfo().getPipelineId(), "0", "description", pc);
+    pipelineStoreTask.save("user", pc.getInfo().getPipelineId(), "0", "description", pc, false);
 
     //create Runner
     Runner runner = pipelineManager.getRunner(pc.getInfo().getPipelineId(), "0");
@@ -119,6 +120,7 @@ public class TestPipelineManagerModule {
   @Test
   public void testSlavePipelineManagerModule() throws PipelineException {
     ObjectGraph objectGraph = ObjectGraph.create(MainSlavePipelineManagerModule.class);
+    ((SlaveRuntimeInfo)objectGraph.get(RuntimeInfo.class)).setId("id");
     TaskWrapper taskWrapper = objectGraph.get(TaskWrapper.class);
     taskWrapper.init();
     Assert.assertTrue(taskWrapper.getTask() instanceof SlavePipelineTask);
@@ -144,7 +146,7 @@ public class TestPipelineManagerModule {
     }
 
     try {
-      pipelineStoreTask.save("user", "p1", "0", "description", Mockito.mock(PipelineConfiguration.class));
+      pipelineStoreTask.save("user", "p1", "0", "description", Mockito.mock(PipelineConfiguration.class), false);
       Assert.fail("Expected UnsupportedOperationException");
     } catch (UnsupportedOperationException e) {
 

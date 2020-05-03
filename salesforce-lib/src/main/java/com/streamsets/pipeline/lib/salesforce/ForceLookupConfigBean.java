@@ -25,8 +25,8 @@ import com.streamsets.pipeline.lib.el.TimeNowEL;
 import com.streamsets.pipeline.stage.common.MissingValuesBehavior;
 import com.streamsets.pipeline.stage.common.MissingValuesBehaviorChooserValues;
 import com.streamsets.pipeline.stage.common.MultipleValuesBehavior;
+import com.streamsets.pipeline.stage.common.MultipleValuesBehaviorChooserValues;
 import com.streamsets.pipeline.stage.processor.kv.CacheConfig;
-import com.streamsets.pipeline.stage.processor.lookup.ForceLookupMultipleValuesBehaviorChooserValues;
 
 import java.util.List;
 
@@ -38,7 +38,7 @@ public class ForceLookupConfigBean extends ForceInputConfigBean {
       label = "Lookup Mode",
       description = "Lookup records by a SOQL Query or by the Salesforce record ID.",
       displayPosition = 50,
-      group = "LOOKUP"
+      group = "QUERY"
   )
   @ValueChooserModel(LookupModeChooserValues.class)
   public LookupMode lookupMode;
@@ -56,22 +56,23 @@ public class ForceLookupConfigBean extends ForceInputConfigBean {
       dependsOn = "lookupMode",
       triggeredByValue = "QUERY",
       displayPosition = 60,
-      group = "LOOKUP"
+      group = "QUERY"
   )
   public String soqlQuery;
 
   @ConfigDef(
       required = true,
       type = ConfigDef.Type.BOOLEAN,
-      label = "Include Deleted Records",
-      description = "When enabled, the processor will additionally retrieve deleted records from the Recycle Bin",
       defaultValue = "false",
+      label = "Use Bulk API",
+      description = "If enabled, records will be read and written via the Salesforce Bulk API, " +
+          "otherwise, the Salesforce SOAP API will be used.",
+      displayPosition = 72,
       dependsOn = "lookupMode",
       triggeredByValue = "QUERY",
-      displayPosition = 70,
-      group = "LOOKUP"
+      group = "QUERY"
   )
-  public boolean queryAll = false;
+  public boolean useBulkAPI;
 
   @ConfigDef(
       required = true,
@@ -82,7 +83,7 @@ public class ForceLookupConfigBean extends ForceInputConfigBean {
       dependsOn = "lookupMode",
       triggeredByValue = "RETRIEVE",
       displayPosition = 75,
-      group = "LOOKUP"
+      group = "QUERY"
   )
   @FieldSelectorModel(singleValued = true)
   public String idField = "";
@@ -99,7 +100,7 @@ public class ForceLookupConfigBean extends ForceInputConfigBean {
       dependsOn = "lookupMode",
       triggeredByValue = "RETRIEVE",
       displayPosition = 80,
-      group = "LOOKUP"
+      group = "QUERY"
   )
   public String retrieveFields = "";
 
@@ -112,7 +113,7 @@ public class ForceLookupConfigBean extends ForceInputConfigBean {
       dependsOn = "lookupMode",
       triggeredByValue = "RETRIEVE",
       displayPosition = 85,
-      group = "LOOKUP"
+      group = "QUERY"
   )
   public String sObjectType = "";
 
@@ -123,7 +124,7 @@ public class ForceLookupConfigBean extends ForceInputConfigBean {
       defaultValue = "",
       description = "Mappings from Salesforce field names to SDC field names",
       displayPosition = 90,
-      group = "LOOKUP"
+      group = "QUERY"
   )
   @ListBeanModel
   public List<ForceSDCFieldMapping> fieldMappings;
@@ -135,9 +136,9 @@ public class ForceLookupConfigBean extends ForceInputConfigBean {
       description = "How to handle multiple values",
       defaultValue = "FIRST_ONLY",
       displayPosition = 95,
-      group = "LOOKUP"
+      group = "QUERY"
   )
-  @ValueChooserModel(ForceLookupMultipleValuesBehaviorChooserValues.class)
+  @ValueChooserModel(MultipleValuesBehaviorChooserValues.class)
   public MultipleValuesBehavior multipleValuesBehavior = MultipleValuesBehavior.DEFAULT;
 
   @ConfigDef(
@@ -147,11 +148,15 @@ public class ForceLookupConfigBean extends ForceInputConfigBean {
       description = "How to handle missing values when no default value is defined.",
       defaultValue = "PASS_RECORD_ON",
       displayPosition = 97,
-      group = "LOOKUP"
+      group = "QUERY"
   )
   @ValueChooserModel(MissingValuesBehaviorChooserValues.class)
   public MissingValuesBehavior missingValuesBehavior = MissingValuesBehavior.DEFAULT;
 
-  @ConfigDefBean(groups = "LOOKUP")
+  @ConfigDefBean(groups = "QUERY")
   public CacheConfig cacheConfig = new CacheConfig();
+
+  public ForceLookupConfigBean() {
+    queryExistingData = true;
+  }
 }

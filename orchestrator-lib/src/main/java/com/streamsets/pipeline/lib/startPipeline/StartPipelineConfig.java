@@ -28,6 +28,15 @@ public class StartPipelineConfig {
   @ConfigDef(
       required = true,
       type = ConfigDef.Type.STRING,
+      label = "Unique Task Name",
+      displayPosition = 5,
+      group = "PIPELINE"
+  )
+  public String taskName;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.STRING,
       defaultValue = "http://localhost:18630",
       label = "Execution Engine URL",
       description = "URL of Data Collector, Data Collector Edge, or Transformer that runs the specified pipelines",
@@ -40,7 +49,6 @@ public class StartPipelineConfig {
       label = "Pipelines",
       required = true,
       type = ConfigDef.Type.MODEL,
-      defaultValue="",
       description="Pipelines to start in parallel",
       displayPosition = 20,
       group = "PIPELINE"

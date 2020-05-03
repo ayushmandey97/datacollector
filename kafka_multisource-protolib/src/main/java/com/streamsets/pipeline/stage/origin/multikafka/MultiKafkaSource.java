@@ -18,10 +18,12 @@ package com.streamsets.pipeline.stage.origin.multikafka;
 import com.google.common.base.Throwables;
 import com.streamsets.pipeline.api.BatchContext;
 import com.streamsets.pipeline.api.DeliveryGuarantee;
+import com.streamsets.pipeline.api.ErrorCode;
 import com.streamsets.pipeline.api.Field;
 import com.streamsets.pipeline.api.Record;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
+import com.streamsets.pipeline.api.ToErrorContext;
 import com.streamsets.pipeline.api.base.BasePushSource;
 import com.streamsets.pipeline.api.base.OnRecordErrorException;
 import com.streamsets.pipeline.api.impl.Utils;
@@ -30,8 +32,11 @@ import com.streamsets.pipeline.api.lineage.LineageEvent;
 import com.streamsets.pipeline.api.lineage.LineageEventType;
 import com.streamsets.pipeline.api.lineage.LineageSpecificAttribute;
 import com.streamsets.pipeline.config.DataFormat;
+import com.streamsets.pipeline.kafka.api.SdcKafkaValidationUtil;
+import com.streamsets.pipeline.kafka.api.SdcKafkaValidationUtilFactory;
 import com.streamsets.pipeline.lib.kafka.KafkaConstants;
 import com.streamsets.pipeline.lib.kafka.KafkaErrors;
+import com.streamsets.pipeline.lib.kafka.KafkaKerberosUtil;
 import com.streamsets.pipeline.lib.kafka.MessageKeyUtil;
 import com.streamsets.pipeline.lib.parser.DataParser;
 import com.streamsets.pipeline.lib.parser.DataParserException;
@@ -74,9 +79,47 @@ public class MultiKafkaSource extends BasePushSource {
   private DataParserFactory parserFactory;
   private ExecutorService executor;
 
+  private SdcKafkaValidationUtil kafkaValidationUtil;
+  private String keytabFileName;
+
   public MultiKafkaSource(MultiKafkaBeanConfig conf) {
     this.conf = conf;
     batchSize = conf.maxBatchSize;
+  }
+
+  /**
+   * Wrapper around DefaultErrorRecordHandler that can count number of passed error records as that is relevant to the
+   * logic we have in this origin.
+   */
+  public static class CountingDefaultErrorRecordHandler implements ErrorRecordHandler {
+
+    private final ErrorRecordHandler delegate;
+    private int errorRecordCount = 0;
+
+    public CountingDefaultErrorRecordHandler(Stage.Context context, ToErrorContext toError) {
+      this.delegate = new DefaultErrorRecordHandler(context, toError);
+    }
+
+    public int getErrorRecordCount() {
+      return errorRecordCount;
+    }
+
+    @Override
+    public void onError(ErrorCode errorCode, Object... params) throws StageException {
+      delegate.onError(errorCode, params);
+    }
+
+    @Override
+    public void onError(OnRecordErrorException error) throws StageException {
+      errorRecordCount++;
+      delegate.onError(error);
+    }
+
+    @Override
+    public void onError(List<Record> batch, StageException error) throws StageException {
+      errorRecordCount += batch.size();
+      delegate.onError(batch, error);
+    }
   }
 
   public class MultiTopicCallable implements Callable<Long> {
@@ -107,7 +150,7 @@ public class MultiKafkaSource extends BasePushSource {
       long messagesProcessed = 0;
       long recordsProcessed = 0;
       BatchContext batchContext = null;
-      ErrorRecordHandler errorRecordHandler = null;
+      CountingDefaultErrorRecordHandler errorRecordHandler = null;
 
       // wait until all threads are spun up before processing
       LOG.debug("Thread {} waiting on other consumer threads to start up", Thread.currentThread().getName());
@@ -115,7 +158,7 @@ public class MultiKafkaSource extends BasePushSource {
 
       LOG.debug("Starting poll loop in thread: {}", Thread.currentThread().getName());
 
-      LOG.info("Minimum Kafka consumer Poll interval is set to: {}, MIN_CONSUMER_POLLING_INTERVAL_MS");
+      LOG.info("Minimum Kafka consumer Poll interval is set to: {}", MIN_CONSUMER_POLLING_INTERVAL_MS);
       try {
         consumer.subscribe(topicList);
         // protected loop. want it to finish completely, or not start at all.
@@ -135,17 +178,32 @@ public class MultiKafkaSource extends BasePushSource {
 
             // start a new batch, get a new error record handler for batch.
             batchContext = getContext().startBatch();
-            errorRecordHandler = new DefaultErrorRecordHandler(getContext(), batchContext);
+            errorRecordHandler = new CountingDefaultErrorRecordHandler(getContext(), batchContext);
           }
 
           for (ConsumerRecord<String, byte[]> item : messages) {
+
+            // We still support Kafka 0.9 that doesn't have support for timestamp. Thus this code simply calls those
+            // methods in a safe manner and fills defaults in case that those methods do not exists. This fragment can
+            // be dropped (or this patch reverted) when we drop support for Kafka 0.9.
+            long timestamp;
+            String timestampType;
+            try {
+              timestamp = item.timestamp();
+              timestampType = item.timestampType().name;
+            } catch (NoSuchMethodError _) {
+              timestamp = -1;
+              timestampType = "";
+            }
 
             records.addAll(createRecord(errorRecordHandler,
                 item.topic(),
                 item.partition(),
                 item.offset(),
                 item.value(),
-                item.key()
+                item.key(),
+                timestamp,
+                timestampType
             ));
 
             if (records.size() >= batchSize) {
@@ -155,7 +213,7 @@ public class MultiKafkaSource extends BasePushSource {
               recordsProcessed += records.size();
               records.clear();
               batchContext = getContext().startBatch();
-              errorRecordHandler = new DefaultErrorRecordHandler(getContext(), batchContext);
+              errorRecordHandler = new CountingDefaultErrorRecordHandler(getContext(), batchContext);
             }
           }
 
@@ -165,9 +223,11 @@ public class MultiKafkaSource extends BasePushSource {
           // Transmit remaining when batchWaitTime expired
           if (pollInterval <= MIN_CONSUMER_POLLING_INTERVAL_MS) {
             startTime = System.currentTimeMillis();
-            if (!records.isEmpty()) {
+            if (!records.isEmpty() || (errorRecordHandler != null && errorRecordHandler.getErrorRecordCount() > 0)) {
               records.forEach(batchContext.getBatchMaker()::addRecord);
               commitSyncAndProcess(batchContext);
+              batchContext = getContext().startBatch();
+              errorRecordHandler = new CountingDefaultErrorRecordHandler(getContext(), batchContext);
               recordsProcessed += records.size();
               records.clear();
             }
@@ -176,7 +236,7 @@ public class MultiKafkaSource extends BasePushSource {
         }
 
       } catch (Exception e) {
-        LOG.error("Encountered error in multi kafka thread {} during read {}", threadID, e);
+        LOG.error("Encountered error in multi kafka thread {} during read {}", threadID, e.getMessage(), e);
         handleException(KafkaErrors.KAFKA_29, e);
       } finally {
         consumer.unsubscribe();
@@ -193,13 +253,13 @@ public class MultiKafkaSource extends BasePushSource {
 
 
     private void commitSyncAndProcess(BatchContext batchContext) {
-      if (getContext().getDeliveryGuarantee() == DeliveryGuarantee.AT_MOST_ONCE) {
+      if (!getContext().isPreview() && getContext().getDeliveryGuarantee() == DeliveryGuarantee.AT_MOST_ONCE) {
         consumer.commitSync();
       }
 
       boolean batchSuccessful = getContext().processBatch(batchContext);
 
-      if (batchSuccessful && getContext().getDeliveryGuarantee() == DeliveryGuarantee.AT_LEAST_ONCE) {
+      if (!getContext().isPreview() && batchSuccessful && getContext().getDeliveryGuarantee() == DeliveryGuarantee.AT_LEAST_ONCE) {
         consumer.commitSync();
       }
     }
@@ -210,7 +270,9 @@ public class MultiKafkaSource extends BasePushSource {
         int partition,
         long offset,
         byte[] payload,
-        Object messageKey
+        Object messageKey,
+        long timestamp,
+        String timestampType
     ) throws StageException {
       Utils.checkNotNull(parserFactory, "Initialization failed");
 
@@ -224,6 +286,14 @@ public class MultiKafkaSource extends BasePushSource {
           record.getHeader().setAttribute(HeaderAttributeConstants.TOPIC, topic);
           record.getHeader().setAttribute(HeaderAttributeConstants.PARTITION, String.valueOf(partition));
           record.getHeader().setAttribute(HeaderAttributeConstants.OFFSET, String.valueOf(offset));
+          if (conf.timestampsEnabled) {
+            record
+                .getHeader()
+                .setAttribute(HeaderAttributeConstants.KAFKA_TIMESTAMP, String.valueOf(timestamp));
+            record
+                .getHeader()
+                .setAttribute(HeaderAttributeConstants.KAFKA_TIMESTAMP_TYPE, timestampType);
+          }
 
           try {
             MessageKeyUtil.handleMessageKey(messageKey,
@@ -288,6 +358,18 @@ public class MultiKafkaSource extends BasePushSource {
       );
     }
 
+    kafkaValidationUtil = SdcKafkaValidationUtilFactory.getInstance().create();
+
+    if (conf.provideKeytab && kafkaValidationUtil.isProvideKeytabAllowed(issues, getContext())) {
+      keytabFileName = KafkaKerberosUtil.saveUserKeytab(
+          conf.userKeytab.get(),
+          conf.userPrincipal,
+          conf.kafkaOptions,
+          issues,
+          getContext()
+      );
+    }
+
     parserFactory = conf.dataFormatConfig.getParserFactory();
 
     if (conf.dataFormat == DataFormat.XML && conf.produceSingleRecordPerMessage) {
@@ -317,6 +399,10 @@ public class MultiKafkaSource extends BasePushSource {
   public void produce(Map<String, String> lastOffsets, int maxBatchSize) throws StageException {
     shutdownCalled.set(false);
     batchSize = Math.min(maxBatchSize, conf.maxBatchSize);
+    if (conf.maxBatchSize > maxBatchSize) {
+      getContext().reportError(KafkaErrors.KAFKA_78, maxBatchSize);
+    }
+
     int numThreads = getNumberOfThreads();
     List<Future<Long>> futures = new ArrayList<>(numThreads);
     CountDownLatch startProcessingGate = new CountDownLatch(numThreads);
@@ -350,7 +436,7 @@ public class MultiKafkaSource extends BasePushSource {
         shutdown();
         Thread.currentThread().interrupt();
       } catch (ExecutionException e) {
-        LOG.info("Multi kafka thread halted unexpectedly: {}", future, e.getCause().getMessage(), e);
+        LOG.info("Multi kafka thread halted unexpectedly: {}", e.getCause().getMessage(), e);
         shutdown();
         Throwables.propagateIfPossible(e.getCause(), StageException.class);
         Throwables.propagate(e.getCause());
@@ -410,8 +496,9 @@ public class MultiKafkaSource extends BasePushSource {
 
   @Override
   public void destroy() {
-    executor.shutdownNow();
     super.destroy();
+    KafkaKerberosUtil.deleteUserKeytabIfExists(keytabFileName, getContext());
+    executor.shutdownNow();
   }
 
   private void shutdown() {

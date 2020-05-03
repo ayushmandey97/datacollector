@@ -24,6 +24,8 @@ public enum StartPipelineErrors implements ErrorCode {
   START_PIPELINE_02("Pipeline ID {} does not exist in Execution Engine: {}"),
   START_PIPELINE_03("Configuration value is required for Pipeline ID, at index: {}"),
   START_PIPELINE_04("Failed to start pipeline: {}"),
+  START_PIPELINE_05("Failed to fetch a unique pipeline from the given pipeline name: {}, found {} entries"),
+  START_PIPELINE_06("Failed to fetch pipeline status: {}"),
   ;
 
   private final String msg;

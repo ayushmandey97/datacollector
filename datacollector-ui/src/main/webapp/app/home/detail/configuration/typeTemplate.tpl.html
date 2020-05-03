@@ -1,5 +1,5 @@
 <script type="text/ng-template" id="labelConfigurationTemplate">
-  <label class="col-lg-3 col-md-4 control-label">{{configDefinition.label}}
+  <label class="col-lg-3 col-md-4 control-label fs-unmask">{{configDefinition.label}}
     <i class="fa fa-info-circle help-icon"
        ng-class="{
        'fa-info-circle': configDefinition.type !== 'CREDENTIAL' && configDefinition.type !== 'EL_CREDENTIAL',
@@ -121,47 +121,201 @@
 </script>
 
 <script type="text/ng-template" id="elCredentialConfigurationTemplate">
-  <div class="controls col-lg-7 col-md-8"
-       ng-init="showValue=(!detailPaneConfig.configuration[configIndex].value || detailPaneConfig.configuration[configIndex].value.indexOf('${') === 0)">
+  <div class="controls col-lg-7 col-md-8">
+    <div ng-switch="configDefinition.upload">
 
-    <div ui-codemirror
-         ng-if="showValue"
-         ng-class="{'codemirror-read-only': isPipelineReadOnly || isPipelineRunning}"
-         focus-me="{{autoFocusConfigName === configDefinition.name}}"
-         ng-model="detailPaneConfig.configuration[configIndex].value"
-         ui-refresh="refreshCodemirror"
-         ui-codemirror-opts="getCodeMirrorOptions({
-                readOnly: (isPipelineReadOnly || isPipelineRunning),
-                autofocus: autoFocusConfigName === configDefinition.name,
-                extraKeys: {
-                  'Tab': false,
-                  'Enter': common.ignoreCodeMirrorEnterKey,
-                  'Ctrl-Space': 'autocomplete'
-                }
-              }, configDefinition)"
-         codemirror-el
-         field-paths="fieldPaths"
-         d-field-paths="dFieldPaths"
-         data-type="configDefinition.type">
+      <div ng-switch-when="TEXT">
+        <!-- When configDefinition.upload==='TEXT', that means a text-based file can be uploaded -->
+        <ng-include src="'elSecretFileConfigurationTemplate'"></ng-include>
+      </div>
+
+      <div ng-switch-default>
+        <ng-include src="'elCredentialTextConfigurationTemplate'"></ng-include>
+      </div>
+    </div>
+    <ng-include src="'configurationIssuesTemplate'"></ng-include>
+  </div>
+</script>
+
+<script type="text/ng-template" id="elCredentialTextConfigurationTemplate">
+  <div ng-controller="elCredentialConfigurationController">
+    <div ng-if="!credentialSettings.useInternalSecrets">
+      <div ui-codemirror
+        ng-if="credentialSettings.showValue"
+        ng-class="{'codemirror-read-only': isPipelineReadOnly || isPipelineRunning}"
+        focus-me="{{autoFocusConfigName === configDefinition.name}}"
+        ng-model="detailPaneConfig.configuration[configIndex].value"
+        ui-refresh="refreshCodemirror"
+        ui-codemirror-opts="getCodeMirrorOptions({
+              readOnly: (isPipelineReadOnly || isPipelineRunning),
+              autofocus: autoFocusConfigName === configDefinition.name,
+              extraKeys: {
+                'Tab': false,
+                'Enter': common.ignoreCodeMirrorEnterKey,
+                'Ctrl-Space': 'autocomplete'
+              }
+            }, configDefinition)"
+        codemirror-el
+        field-paths="fieldPaths"
+        d-field-paths="dFieldPaths"
+        data-type="configDefinition.type">
+      </div>
+
+      <input type="password" class="form-control"
+            ng-if="!credentialSettings.showValue"
+          name="{{configDefinition.name}}"
+          focus-me="{{autoFocusConfigName === configDefinition.name}}"
+          ng-readonly="isPipelineReadOnly || isPipelineRunning"
+            ng-model="detailPaneConfig.configuration[configIndex].value"
+            ng-required="configDefinition.required">
+
+
+      <div class="pull-right field-selector-btn" ng-hide="isPipelineReadOnly || isPipelineRunning">
+        <button type="button" class="btn btn-link"
+                ng-click="credentialSettings.showValue = !credentialSettings.showValue">
+          {{credentialSettings.showValue ? ('global.form.hideValue' | translate) : ('global.form.showValue' | translate)}}
+        </button>
+      </div>
     </div>
 
-    <input type="password" class="form-control"
-           ng-if="!showValue"
-           name="{{configDefinition.name}}"
-           focus-me="{{autoFocusConfigName === configDefinition.name}}"
-           ng-readonly="isPipelineReadOnly || isPipelineRunning"
-           ng-model="detailPaneConfig.configuration[configIndex].value"
-           ng-required="configDefinition.required">
+    <div ng-if="credentialSettings.useInternalSecrets">
+      <div ui-codemirror
+        ng-if="credentialSettings.showExpression"
+        ng-class="{'codemirror-read-only': isPipelineReadOnly || isPipelineRunning}"
+        focus-me="{{autoFocusConfigName === configDefinition.name}}"
+        ng-model="expressionValue"
+        ng-model-options="{ getterSetter: true }"
+        ui-refresh="refreshCodemirror"
+        ui-codemirror-opts="getCodeMirrorOptions({
+              readOnly: (isPipelineReadOnly || isPipelineRunning),
+              autofocus: autoFocusConfigName === configDefinition.name,
+              extraKeys: {
+                'Tab': false,
+                'Enter': common.ignoreCodeMirrorEnterKey,
+                'Ctrl-Space': 'autocomplete'
+              }
+            }, configDefinition)"
+        codemirror-el
+        field-paths="fieldPaths"
+        d-field-paths="dFieldPaths"
+        data-type="configDefinition.type">
+      </div>
 
+      <div ng-class="{'input-group': (!credentialSettings.showExpression && credentialSettings.credentialValue) || credentialSettings.saved}">
+        <input type="{{credentialSettings.showCredential ? 'text' : 'password'}}" class="form-control fs-exclude"
+          ng-if="!credentialSettings.showExpression"
+          name="{{configDefinition.name}}"
+          focus-me="{{autoFocusConfigName === configDefinition.name}}"
+          ng-readonly="isPipelineReadOnly || isPipelineRunning"
+          ng-model="credentialSettings.credentialValue"
+          ng-keyup="onCredentialInputKeyup($event)"
+          ng-required="configDefinition.required"
+          placeholder="{{detailPaneConfig.configuration[configIndex].value ? '********' : ''}}">
+        <span class="input-group-btn"
+          ng-if="!credentialSettings.showExpression && credentialSettings.credentialValue">
+          <button class="btn btn-default" type="button"
+            ng-click="saveCredential()"
+            tooltip="Save credential"
+            tooltip-append-to-body="true"
+            tooltip-popup-delay="500">
+            <i class="glyphicon glyphicon-ok confirm-check"></i>
+          </button>
+          <button class="btn btn-default" type="button"
+            ng-click="blankCredential()"
+            tooltip="Cancel credential change"
+            tooltip-append-to-body="true"
+            tooltip-popup-delay="500">
+            <i class="glyphicon glyphicon-remove cancel-x"></i>
+          </button>
+          <button class="btn btn-default" type="button"
+            ng-click="toggleShowCredential()"
+            tooltip="Toggle showing credential"
+            tooltip-append-to-body="true"
+            tooltip-popup-delay="500">
+            <i class="{{'glyphicon '  + (credentialSettings.showCredential ? 'glyphicon-eye-close' : 'glyphicon-eye-open')}}"></i>
+          </button>
+        </span>
+        <span class="input-group-addon"
+          ng-if="credentialSettings.saved && !(!credentialSettings.showExpression && credentialSettings.credentialValue)">
+          Saved!
+        </span>
+      </div>
+
+      <div class="pull-right field-selector-btn" ng-hide="isPipelineReadOnly || isPipelineRunning">
+        <button type="button" class="btn btn-link"
+                ng-click="toggleShowExpression()">
+          {{credentialSettings.showExpression ? 'Enter Credential' : (expressionValue() ? 'Show Expression' : 'Enter Expression')}}
+        </button>
+      </div>
+    </div>
+  </div>
+</script>
+
+<script type="text/ng-template" id="elSecretFileConfigurationTemplate">
+  <div ng-controller="elSecretFileConfigurationController"
+      class="secret-file-configuration">
+    <div ui-codemirror
+      ng-if="credentialSettings.showExpression || !credentialSettings.useInternalSecrets"
+      ng-class="{'codemirror-read-only': isPipelineReadOnly || isPipelineRunning}"
+      focus-me="{{autoFocusConfigName === configDefinition.name}}"
+      ng-model="expressionValue"
+      ng-model-options="{ getterSetter: true }"
+      ui-refresh="refreshCodemirror"
+      ui-codemirror-opts="getCodeMirrorOptions({
+            readOnly: (isPipelineReadOnly || isPipelineRunning),
+            autofocus: autoFocusConfigName === configDefinition.name,
+            extraKeys: {
+              'Tab': false,
+              'Enter': common.ignoreCodeMirrorEnterKey,
+              'Ctrl-Space': 'autocomplete'
+            }
+          }, configDefinition)"
+      codemirror-el
+      field-paths="fieldPaths"
+      d-field-paths="dFieldPaths"
+      data-type="configDefinition.type">
+    </div>
+
+    <div ng-if="!credentialSettings.showExpression && credentialSettings.useInternalSecrets">
+
+      <div class="input-group" ng-if="configDefinition.name === 'sshTunnelConfig.sshPublicKey' && isUsingInternalPublicKey()">
+        <div class="input-group-btn">
+          <span class="btn btn-primary btn-file">
+              {{'home.import.browse' | translate}}&hellip; <input type="file" fileread="credentialSettings.uploadFile">
+          </span>
+        </div>
+        <input type="text" readonly class="form-control" value="{{ credentialSettings.sshPublicKey }}">
+        <div class="input-group-btn">
+          <button class="btn btn-default" type="button" tooltip="Download" tooltip-append-to-body="true" tooltip-popup-delay="500"
+              ng-click="downloadSshPubKey()">
+            <i class="glyphicon glyphicon-download-alt"></i>
+          </button>
+          <button class="btn btn-default" type="button" tooltip="Copy" tooltip-append-to-body="true" tooltip-popup-delay="500"
+              ng-click="copySshPubKey()">
+            <i class="glyphicon glyphicon-copy"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="input-group" ng-if="configDefinition.name !== 'sshTunnelConfig.sshPublicKey' || !isUsingInternalPublicKey()">
+        <div class="input-group-btn">
+          <span class="btn btn-primary btn-file">
+              {{'home.import.browse' | translate}}&hellip; <input type="file" fileread="credentialSettings.uploadFile">
+          </span>
+        </div>
+        <input type="text" class="form-control" readonly ng-model="credentialSettings.uploadFile.name"
+              placeholder="{{isUsingInternalPrivateKey() ? 'Using default private key' : ('home.import.fileUploadPlaceholder' | translate)}}">
+      </div>
+
+    </div>
 
     <div class="pull-right field-selector-btn" ng-hide="isPipelineReadOnly || isPipelineRunning">
       <button type="button" class="btn btn-link"
-              ng-click="showValue = !showValue">
-        {{showValue ? ('global.form.hideValue' | translate) : ('global.form.showValue' | translate)}}
+              ng-if="credentialSettings.useInternalSecrets"
+              ng-click="toggleShowExpression()">
+        {{credentialSettings.showExpression ? 'Upload File' : (expressionValue() ? 'Show Expression' : 'Enter Expression')}}
       </button>
     </div>
-
-    <ng-include src="'configurationIssuesTemplate'"></ng-include>
   </div>
 </script>
 

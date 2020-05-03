@@ -207,7 +207,8 @@ angular.module('pipelineGraphDirectives', [])
       nodeRadius: 70,
       rectWidth: 140,
       rectHeight: 100,
-      rectRound: 14
+      rectRound: 14,
+      runningNodeClass: 'runningNode'
     };
 
     /* PROTOTYPE FUNCTIONS */
@@ -868,6 +869,17 @@ angular.module('pipelineGraphDirectives', [])
         });
       */
 
+      //Add Running icon
+      newGs.append('svg:foreignObject')
+        .attr('width', 30)
+        .attr('height', 30)
+        .attr('x', consts.rectWidth - 35)
+        .attr('y', 8)
+        .append('xhtml:span')
+        .attr('class', 'running-stage fa fa-gear fa-spin fa-2x graph-bootstrap-tooltip')
+        .attr('title', 'running')
+        .attr('data-placement', 'bottom');
+
       //Add bad records count
       newGs.append('svg:foreignObject')
         .attr('width', 100)
@@ -877,6 +889,7 @@ angular.module('pipelineGraphDirectives', [])
         .append('xhtml:span')
         .attr('title', graphErrorBadgeLabel)
         .attr('class', 'badge alert-danger pointer graph-bootstrap-tooltip')
+        .attr('data-placement', 'bottom')
         .style('visibility', function(d) {
           if (stageErrorCounts && stageErrorCounts[d.instanceName] &&
             parseInt(stageErrorCounts[d.instanceName]) > 0) {
@@ -1597,6 +1610,21 @@ angular.module('pipelineGraphDirectives', [])
       }
     });
 
+    $scope.$on('updateRunningStage', function(event, runningStageInstances) {
+      if (graph) {
+        // hide all beta icons during pipeline run, so it won't overlap with running stage icon
+        graph.rects.selectAll('.beta-stage').style('visibility', 'hidden');
+
+        graph.rects.classed(graph.consts.runningNodeClass, false);
+        graph.rects
+          .filter(function(d) {
+            return (runningStageInstances && runningStageInstances.indexOf(d.instanceName) !== -1);
+          })
+          .classed(graph.consts.runningNodeClass, true)
+          .classed('verbose', $rootScope.$storage.currentStageVerbose);
+      }
+    });
+
     $scope.$on('updateDirtyLaneConnector', function(event, dirtyLanes) {
       if (graph) {
         graph.dirtyLanes = dirtyLanes;
@@ -1725,6 +1753,24 @@ angular.module('pipelineGraphDirectives', [])
           type: pipelineConstant.PIPELINE
         });
         graph.updateGraph();
+
+        var stageTrackingDetail = {
+          'Pipeline ID': $scope.pipelineConfig.pipelineId,
+          'Stage ID': selectedNode.instanceName,
+          'Stage Type Name': selectedNode.stageName,
+          'Library Name': selectedNode.library
+        };
+        if (selectedNode.uiInfo.stageType === pipelineConstant.SOURCE_STAGE_TYPE) {
+          mixpanel.track('Origin Removed', stageTrackingDetail);
+        } else if (selectedNode.uiInfo.stageType == pipelineConstant.PROCESSOR_STAGE_TYPE) {
+          mixpanel.track('Processor Removed', stageTrackingDetail);
+        } else if (selectedNode.uiInfo.stageType == pipelineConstant.TARGET_STAGE_TYPE) {
+          mixpanel.track('Destination Removed', stageTrackingDetail);
+        } else if (selectedNode.uiInfo.stageType == pipelineConstant.EXECUTOR_STAGE_TYPE) {
+          mixpanel.track('Executor Removed', stageTrackingDetail);
+        } else {
+          mixpanel.track('Stage with unknown type removed', stageTrackingDetail);
+        }
       }
     };
 

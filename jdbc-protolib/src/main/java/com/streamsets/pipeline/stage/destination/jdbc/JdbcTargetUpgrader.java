@@ -18,13 +18,18 @@ package com.streamsets.pipeline.stage.destination.jdbc;
 import com.streamsets.pipeline.api.Config;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.impl.Utils;
+import com.streamsets.pipeline.lib.jdbc.JDBCOperationType;
 import com.streamsets.pipeline.lib.jdbc.JdbcBaseUpgrader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
 /** {@inheritDoc} */
 public class JdbcTargetUpgrader extends JdbcBaseUpgrader{
+  private static final Logger LOG = LoggerFactory.getLogger(JdbcTargetUpgrader.class);
 
   @Override
   public List<Config> upgrade(String library, String stageName, String stageInstance, int fromVersion, int toVersion, List<Config> configs) throws StageException {
@@ -61,6 +66,18 @@ public class JdbcTargetUpgrader extends JdbcBaseUpgrader{
         // fall through
       case 6:
         upgradeV6toV7(configs);
+        if(toVersion == 7) {
+          break;
+        }
+        //fall through
+      case 7:
+        //fall through
+      case 8:
+        //fall through
+        //We bumped the Sql server source to 10, so making it consistent
+      case 9:
+        removeDriverClassNameAndTestQuery(configs);
+        upgradeV8ToV9(configs);
         break;
       default:
         throw new IllegalStateException(Utils.format("Unexpected fromVersion {}", fromVersion));
@@ -68,13 +85,16 @@ public class JdbcTargetUpgrader extends JdbcBaseUpgrader{
     return configs;
   }
 
+
   private void upgradeV4toV5(List<Config> configs) {
+    LOG.info("Upgrading from 4 to 5");
     // added new max parameters feature - set to default
     configs.add(new Config("maxPrepStmtParameters", -1));
   }
 
   @SuppressWarnings("unchecked")
   private void upgradeV1toV2(List<Config> configs) {
+    LOG.info("Upgrading from 1 to 2");
     configs.add(new Config("changeLogFormat", "NONE"));
 
     Config tableNameConfig = null;
@@ -100,10 +120,12 @@ public class JdbcTargetUpgrader extends JdbcBaseUpgrader{
   }
 
   private void upgradeV2toV3(List<Config> configs) {
+    LOG.info("Upgrading from 2 to 3");
     configs.add(new Config("useMultiRowInsert", true));
   }
 
   private void upgradeV3toV4(List<Config> configs) {
+    LOG.info("Upgrading from 3 to 4");
     upgradeToConfigBeanV1(configs);
 
     Config tableNameConfig = null;
@@ -131,6 +153,7 @@ public class JdbcTargetUpgrader extends JdbcBaseUpgrader{
   }
 
   private void upgradeV5toV6(List<Config> configs) {
+    LOG.info("Upgrading from 5 to 5");
     // added default operation, unsupported operation action, and maxPrepStmtCache
     configs.add(new Config("defaultOperation", "INSERT"));
     configs.add(new Config("unsupportedAction", "DISCARD"));
@@ -138,6 +161,7 @@ public class JdbcTargetUpgrader extends JdbcBaseUpgrader{
   }
 
   private void upgradeV6toV7(List<Config> configs) {
+    LOG.info("Upgrading from 6 to 7");
     Config maxPrepStmtCache = null;
     for (Config config : configs) {
       if (config.getName().equals("maxPrepStmtCache")) {
@@ -150,4 +174,19 @@ public class JdbcTargetUpgrader extends JdbcBaseUpgrader{
       configs.remove(maxPrepStmtCache);
     }
   }
+
+  private void upgradeV8ToV9(List<Config> configs) {
+    LOG.info("Upgrading from 8 to 9");
+    List<Config> configsToRemove = new ArrayList<>();
+    List<Config> configsToAdd = new ArrayList<>();
+    for (Config config : configs) {
+     if (config.getName().equals("defaultOperation") && config.getValue() == null) {
+       configsToRemove.add(config);
+       configsToAdd.add(new Config(config.getName(), JDBCOperationType.INSERT));
+     }
+    }
+    configs.removeAll(configsToRemove);
+    configs.addAll(configsToAdd);
+  }
+
 }

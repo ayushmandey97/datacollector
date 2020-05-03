@@ -22,7 +22,7 @@
   <parent>
     <artifactId>streamsets-datacollector-root-lib</artifactId>
     <groupId>com.streamsets</groupId>
-    <version>3.15.0-SNAPSHOT</version>
+    <version>3.16.0-SNAPSHOT</version>
     <relativePath>../root-lib</relativePath>
   </parent>
   <modelVersion>4.0.0</modelVersion>
@@ -81,6 +81,11 @@
 
     <!-- Test -->
     <dependency>
+      <groupId>com.streamsets</groupId>
+      <artifactId>streamsets-datacollector-stagesupport</artifactId>
+      <type>test-jar</type>
+    </dependency>
+    <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
       <scope>test</scope>
@@ -99,7 +104,6 @@
     <dependency>
       <groupId>org.mockito</groupId>
       <artifactId>mockito-all</artifactId>
-      <version>1.10.19</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

@@ -151,8 +151,6 @@ angular
           return;
         }
 
-        $scope.trackEvent(pipelineConstant.STAGE_CATEGORY, pipelineConstant.ADD_ACTION, stage.label, 1);
-
         if (stage.type === pipelineConstant.SOURCE_STAGE_TYPE) {
           var sourceExists = false;
           angular.forEach($scope.stageInstances, function (sourceStageInstance) {
@@ -253,6 +251,38 @@ angular
         }
 
         $scope.$broadcast('addNode', stageInstance, edges, relativeXPos, relativeYPos);
+
+        // MixPanel data
+        var stageTrackingDetail = {
+          'Pipeline ID': $scope.pipelineConfig.pipelineId,
+          'Stage ID': stageInstance.instanceName,
+          'Stage Type Name': stageInstance.stageName,
+          'Library Name': stageInstance.library
+        };
+        $scope.trackEvent(pipelineConstant.STAGE_CATEGORY, pipelineConstant.ADD_ACTION, stage.label, 1);
+        if (stageInstance.uiInfo.stageType === pipelineConstant.SOURCE_STAGE_TYPE) {
+          mixpanel.track('Origin Added', stageTrackingDetail);
+          mixpanel.people.set({
+            'Core Journey Stage - Origin Added': true
+          });
+        } else if (stageInstance.uiInfo.stageType == pipelineConstant.PROCESSOR_STAGE_TYPE) {
+          mixpanel.track('Processor Added', stageTrackingDetail);
+          mixpanel.people.set({
+            'Core Journey Stage - Processor Added': true
+          });
+        } else if (stageInstance.uiInfo.stageType == pipelineConstant.TARGET_STAGE_TYPE) {
+          mixpanel.track('Destination Added', stageTrackingDetail);
+          mixpanel.people.set({
+            'Core Journey Stage - Destination Added': true
+          });
+        } else if (stageInstance.uiInfo.stageType == pipelineConstant.EXECUTOR_STAGE_TYPE) {
+          mixpanel.track('Executor Added', stageTrackingDetail);
+          mixpanel.people.set({
+            'Core Journey Stage - Executor Added': true
+          });
+        } else {
+          mixpanel.track('Stage with unknown type added', stageTrackingDetail);
+        }
       },
 
       /**
@@ -281,10 +311,13 @@ angular
        *
        */
       previewPipeline: function(showPreviewConfig) {
-        //Clear Previous errors
+        // Clear Previous errors
         $rootScope.common.errors = [];
         if (!$scope.pipelineConfig.uiInfo.previewConfig.rememberMe || showPreviewConfig) {
           $scope.trackEvent(pipelineConstant.BUTTON_CATEGORY, pipelineConstant.CLICK_ACTION, 'Preview Pipeline Configuration', 1);
+          trackingData = pipelineService.getTrackingInfo($scope.pipelineConfig);
+          mixpanel.track('Preview Selected', trackingData);
+
           var modalInstance = $modal.open({
             templateUrl: 'app/home/preview/configuration/previewConfigModal.tpl.html',
             controller: 'PreviewConfigModalInstanceController',
@@ -1898,6 +1931,19 @@ angular
 
     var prepareForPreview = function() {
       $scope.trackEvent(pipelineConstant.BUTTON_CATEGORY, pipelineConstant.CLICK_ACTION, 'Run Preview', 1);
+      var trackingData = pipelineService.getTrackingInfo($scope.pipelineConfig);
+      var previewConfig = $scope.pipelineConfig.uiInfo.previewConfig;
+      trackingData['Preview Source'] = previewConfig.previewSource;
+      trackingData['Preview Batch Size'] = previewConfig.batchSize;
+      trackingData['Preview Timeout'] = previewConfig.timeout;
+      trackingData['Has Write to Destinations'] = previewConfig.writeToDestinations;
+      trackingData['Has Pipeline Lifecycle Events'] = previewConfig.executeLifecycleEvents;
+      trackingData['Has Show Record Field Header'] = previewConfig.showHeader;
+      trackingData['Has Show Field Type'] = previewConfig.showFieldType;
+      trackingData['Has Remember The Configuration'] = previewConfig.rememberMe;
+      mixpanel.people.set({'Core Journey Stage - Preview Run': true});
+      mixpanel.track('Preview Config Complete', trackingData);
+      
       $scope.previewMode = true;
       $rootScope.$storage.maximizeDetailPane = false;
       $rootScope.$storage.minimizeDetailPane = false;
@@ -2239,11 +2285,13 @@ angular
 
       });
 
+    var updatedRunningStageStatus = false;
     metricsWatchListener = $rootScope.$watch('common.pipelineMetrics', function() {
-      var pipelineStatus = $rootScope.common.pipelineStatusMap[routeParamPipelineName],
-        config = $scope.pipelineConfig;
+      var pipelineStatus = $rootScope.common.pipelineStatusMap[routeParamPipelineName];
+      var config = $scope.pipelineConfig;
+      var pipelineMetrics  = $rootScope.common.pipelineMetrics;
       if (pipelineStatus && config && pipelineStatus.pipelineId === config.info.pipelineId &&
-        $scope.isPipelineRunning && $rootScope.common.pipelineMetrics) {
+        $scope.isPipelineRunning && pipelineMetrics) {
 
         if (!$scope.snapshotMode) {
           $scope.$broadcast('updateErrorCount', getStageErrorCounts());
@@ -2252,12 +2300,27 @@ angular
         $scope.triggeredAlerts = pipelineService.getTriggeredAlerts(
           routeParamPipelineName,
           $scope.pipelineRules,
-          $rootScope.common.pipelineMetrics
+          pipelineMetrics
         );
+
+        if (pipelineMetrics.gauges && pipelineMetrics.gauges['RuntimeStatsGauge.gauge'] &&
+          pipelineMetrics.gauges['RuntimeStatsGauge.gauge'].value) {
+          $scope.$broadcast(
+            'updateRunningStage',
+            pipelineMetrics.gauges['RuntimeStatsGauge.gauge'].value.currentStages
+          );
+          updatedRunningStageStatus = true;
+        } else {
+          $scope.$broadcast('updateRunningStage', null);
+        }
 
         $scope.$broadcast('updateEdgePreviewIconColor', $scope.pipelineRules, $scope.triggeredAlerts);
       } else {
         $scope.triggeredAlerts = [];
+        if (updatedRunningStageStatus) {
+          $scope.$broadcast('updateRunningStage', null);
+          updatedRunningStageStatus = false;
+        }
       }
     });
 

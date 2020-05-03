@@ -38,3 +38,17 @@ upgrades:
       - setConfig:
           name: conf.dataFormatConfig.preserveRootElement
           value: false
+  - toVersion: 6
+    actions:
+      - setConfig:
+          name: conf.timestampsEnabled
+          value: false
+      - setConfig:
+          name: conf.provideKeytab
+          value: false
+      - setConfig:
+          name: conf.userKeytab
+          value: ""
+      - setConfig:
+          name: conf.userPrincipal
+          value: "user/host@REALM"

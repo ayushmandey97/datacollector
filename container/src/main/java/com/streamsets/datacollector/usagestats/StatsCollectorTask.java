@@ -15,9 +15,10 @@
  */
 package com.streamsets.datacollector.usagestats;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
-import com.streamsets.datacollector.bundles.SupportBundleManager;
 import com.streamsets.datacollector.config.PipelineConfiguration;
 import com.streamsets.datacollector.io.DataStore;
 import com.streamsets.datacollector.json.ObjectMapperFactory;
@@ -25,8 +26,10 @@ import com.streamsets.datacollector.main.BuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.task.AbstractTask;
 import com.streamsets.datacollector.util.Configuration;
+import com.streamsets.lib.security.http.RestClient;
 import com.streamsets.pipeline.api.ErrorCode;
 import com.streamsets.pipeline.lib.executor.SafeScheduledExecutorService;
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +39,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
@@ -43,13 +49,45 @@ import java.util.concurrent.TimeUnit;
 
 public class StatsCollectorTask extends AbstractTask implements StatsCollector {
   private static final Logger LOG = LoggerFactory.getLogger(StatsCollectorTask.class);
+  private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.get();
 
-  static final String ROLL_FREQUENCY_CONFIG = "stats.rollFrequency.days";
+  public static final String GET_TELEMETRY_URL_ENDPOINT = "usage.reporting.getTelemetryUrlEndpoint";
+  /** Override to collect telemetry even for -SNAPSHOT versioned builds **/
+  public static final String TELEMETRY_FOR_SNAPSHOT_BUILDS = "usage.reporting.getTelemetryUrlEndpoint.collectSnapshotBuilds";
+  public static final String GET_TELEMETRY_URL_ENDPOINT_DEFAULT = "https://telemetry.streamsets.com/getTelemetryUrl";
+  /** Tells getTelemetryUrl endpoint to use the test bucket **/
+  public static final String TELEMETRY_USE_TEST_BUCKET = "usage.reporting.getTelemetryUrlEndpoint.useTestBucket";
+  public static final boolean TELEMETRY_USE_TEST_BUCKET_DEFAULT = false;
 
-  private static final int ROLL_FREQUENCY_DEFAULT = 7;
-  private static final int REPORT_STATS_FAILED_COUNT_LIMIT = 5;
-  private static final int REPORT_PERIOD = 60;
-  private static final int EXTENDED_REPORT_STATS_FAILED_COUNT_LIMIT = 3;
+  public static final String TELEMETRY_REPORT_PERIOD_SECONDS = "usage.reporting.period.seconds";
+
+  // How often we report stats intervals, every 24 hrs
+  public static final int TELEMETRY_REPORT_PERIOD_SECONDS_DEFAULT = 60 * 60 * 24;
+
+
+  @VisibleForTesting
+  static final String GET_TELEMETRY_URL_ARG_CLIENT_ID = "client_id";
+  @VisibleForTesting
+  static final String GET_TELEMETRY_URL_ARG_EXTENSION = "extension";
+  @VisibleForTesting
+  static final String GET_TELEMETRY_URL_ARG_EXTENSION_JSON = "json";
+  @VisibleForTesting
+  static final String GET_TELEMETRY_URL_ARG_TEST_BUCKET = "test_bucket";
+  @VisibleForTesting
+  static final String TELEMETRY_URL_KEY = "url";
+
+  public static final String USAGE_PATH = "usage.reporting.path";
+  public static final String USAGE_PATH_DEFAULT = "/public-rest/v4/usage/datacollector3";
+
+  static final String TEST_ROLL_PERIOD_CONFIG = "stats.rollFrequency.test.minutes";
+
+  static final String ROLL_PERIOD_CONFIG = "stats.rollFrequency.hours";
+  static final long ROLL_PERIOD_CONFIG_MAX = 1;
+
+
+  private static final int REPORT_STATS_FAILED_COUNT_LIMIT = 31;
+
+  private static final int EXTENDED_REPORT_STATS_FAILED_COUNT_LIMIT = 30;
 
   static final String OPT_FILE = "opt-stats.json";
 
@@ -60,11 +98,12 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
 
   private final BuildInfo buildInfo;
   private final RuntimeInfo runtimeInfo;
+  private final Configuration config;
   private final long rollFrequencyMillis;
   private final SafeScheduledExecutorService executorService;
-  private final SupportBundleManager bundleManager;
   private final File optFile;
   private final File statsFile;
+  private final SysInfo sysInfo;
   private boolean opted;
   private volatile boolean active;
   private long lastReport;
@@ -78,18 +117,22 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
       RuntimeInfo runtimeInfo,
       Configuration config,
       SafeScheduledExecutorService executorService,
-      SupportBundleManager bundleManager
+      SysInfo sysInfo
   ) {
     super("StatsCollector");
     this.buildInfo = buildInfo;
     this.runtimeInfo = runtimeInfo;
-    rollFrequencyMillis = TimeUnit.DAYS.toMillis(config.get(ROLL_FREQUENCY_CONFIG, ROLL_FREQUENCY_DEFAULT));
+    this.config = config;
+    long rollFrequencyConfigMillis = (config.get(TEST_ROLL_PERIOD_CONFIG, -1) <= 0)?
+        TimeUnit.HOURS.toMillis(config.get(ROLL_PERIOD_CONFIG, ROLL_PERIOD_CONFIG_MAX)) :
+        TimeUnit.MINUTES.toMillis(config.get(TEST_ROLL_PERIOD_CONFIG, 1));
+    rollFrequencyMillis = Math.min(TimeUnit.HOURS.toMillis(ROLL_PERIOD_CONFIG_MAX), rollFrequencyConfigMillis);
     this.executorService = executorService;
-    this.bundleManager = bundleManager;
     optFile = new File(runtimeInfo.getDataDir(), OPT_FILE);
     statsFile = new File(runtimeInfo.getDataDir(), STATS_FILE);
     reportStatsFailedCount = 0;
     extendedReportStatsFailedCount = 0;
+    this.sysInfo = sysInfo;
   }
 
   @VisibleForTesting
@@ -103,11 +146,6 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
   }
 
   @VisibleForTesting
-  protected SupportBundleManager getBundleManager() {
-    return bundleManager;
-  }
-
-  @VisibleForTesting
   protected File getOptFile() {
     return optFile;
   }
@@ -116,6 +154,8 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
   protected File getStatsFile() {
     return statsFile;
   }
+
+  protected SysInfo getSysInfo() { return sysInfo; }
 
   @VisibleForTesting
   protected long getRollFrequencyMillis() {
@@ -132,6 +172,7 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
     super.initTask();
 
     statsInfo =  new StatsInfo();
+    statsInfo.setCurrentSystemInfo(getBuildInfo(), getRuntimeInfo(), getSysInfo());
 
     if (runtimeInfo.isClusterSlave()) {
       opted = true;
@@ -151,7 +192,7 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
               opted = true;
               active = (Boolean) map.get(STATS_ACTIVE_KEY);
             }
-            if (active) {
+            if (isActive()) {
               if (map.containsKey(STATS_LAST_REPORT_KEY)) {
                 lastReport = (Long) map.get(STATS_LAST_REPORT_KEY);
               }
@@ -163,7 +204,7 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
           LOG.warn("Stats collection opt-in error, switching off and re-opting. Error: {}", ex.getMessage(), ex);
         }
       }
-      if (active) {
+      if (isActive()) {
         if (statsFile.exists()) {
           DataStore ds = new DataStore(statsFile);
           try {
@@ -200,7 +241,7 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
           );
         }
       }
-      if (!active) {
+      if (!isActive()) {
         try {
           if (statsFile.exists()) {
             if (statsFile.delete()) {
@@ -217,81 +258,190 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
       }
     }
     if (!getRuntimeInfo().isClusterSlave()) {
-      LOG.info("Stats Collection, opted '{}, active '{}'", opted, active);
+      LOG.info("Stats Collection, opted '{}, active '{}'", opted, isActive());
     }
     // when disabled all persistency/reporting done by the Runnable is a No Op.
-    /*
-     * Disable stats collection thread from being run for now,
-     * since this is closely tied with support bundle upload feature - which is removed - refer SDC-13110
-     * This will be reworked in a future release
-     *
-     * getStatsInfo().startSystem();
-     * getRunnable().run();
-     * future = executorService.scheduleAtFixedRate(getRunnable(), REPORT_PERIOD, REPORT_PERIOD, TimeUnit.SECONDS);
-     */
+    getStatsInfo().startSystem();
+    getRunnable(true).run();
+    future = executorService.scheduleAtFixedRate(getRunnable(false), 60, 60 , TimeUnit.SECONDS);
   }
 
-  Runnable getRunnable() {
+  long getReportPeriodSeconds() {
+    return Math.min(
+        TELEMETRY_REPORT_PERIOD_SECONDS_DEFAULT,
+        config.get(TELEMETRY_REPORT_PERIOD_SECONDS, TELEMETRY_REPORT_PERIOD_SECONDS_DEFAULT)
+    );
+  }
+
+  Runnable getRunnable(boolean forceRollAndReport) {
     return () -> {
-      if (active) {
-        if (getStatsInfo().rollIfNeeded(getBuildInfo(), getRuntimeInfo(), getRollFrequencyMillis())) {
-          LOG.debug("Stats collection data rolled");
-        }
-        if (!getStatsInfo().getCollectedStats().isEmpty()) {
-          LOG.debug("Reporting");
-          if (reportStats(getStatsInfo().getCollectedStats())) {
-            LOG.debug("Reported");
-            reportStatsFailedCount = 0;
-            extendedReportStatsFailedCount = 0;
-            getStatsInfo().getCollectedStats().clear();
-          } else {
-            reportStatsFailedCount++;
-            LOG.debug("Reporting has failed {} time(s) in a row", reportStatsFailedCount);
-            if (reportStatsFailedCount > REPORT_STATS_FAILED_COUNT_LIMIT) {
+      synchronized (this) {
+        /*
+        Roll every 1 hr, or on initial run
+        Report every 24 hrs, on initial run
+        Save stats every 60s (protects against crashes)
+        On graceful shutdown, this is run one last time as well (mostly to guarantee save stats)
+        */
+        if (isActive()) {
+          if (getStatsInfo().rollIfNeeded(getBuildInfo(), getRuntimeInfo(), getSysInfo(), getRollFrequencyMillis(), forceRollAndReport)) {
+            LOG.debug("Stats collection data rolled");
+          }
+          if (shouldReport(forceRollAndReport)) {
+            LOG.debug("Reporting");
+            List<StatsBean> collectedStats = getStatsInfo().getCollectedStats();
+            if (reportStats(collectedStats)) {
+              LOG.debug("Reported");
               reportStatsFailedCount = 0;
-              extendedReportStatsFailedCount++;
-              if (extendedReportStatsFailedCount > EXTENDED_REPORT_STATS_FAILED_COUNT_LIMIT) {
-                LOG.warn("Reporting has failed too many times and will be switched off", reportStatsFailedCount);
-                extendedReportStatsFailedCount = 0;
-                future.cancel(false);
-                future = executorService.scheduleAtFixedRate(
-                    getRunnable(),
-                    REPORT_PERIOD,
-                    REPORT_PERIOD,
-                    TimeUnit.SECONDS
-                );
-                setActive(false);
-              } else {
-                int delay = (int)Math.pow(2, extendedReportStatsFailedCount - 1);
-                LOG.warn("Reporting will back off for {} day(s)", delay);
-                future.cancel(false);
-                future = executorService.scheduleAtFixedRate(
-                    getRunnable(),
-                    delay * 60 * 60 * 24,
-                    REPORT_PERIOD,
-                    TimeUnit.SECONDS
-                );
+              extendedReportStatsFailedCount = 0;
+              getStatsInfo().getCollectedStats().clear();
+            } else {
+              reportStatsFailedCount++;
+              LOG.debug("Reporting has failed {} time(s) in a row", reportStatsFailedCount);
+              if (reportStatsFailedCount > REPORT_STATS_FAILED_COUNT_LIMIT) {
+                reportStatsFailedCount = 0;
+                extendedReportStatsFailedCount++;
+                long defaultReportPeriod = getReportPeriodSeconds();
+                if (extendedReportStatsFailedCount > EXTENDED_REPORT_STATS_FAILED_COUNT_LIMIT) {
+                  LOG.warn("Reporting has failed too many times and will be switched off", reportStatsFailedCount);
+                  extendedReportStatsFailedCount = 0;
+                  future.cancel(false);
+                  future = executorService.scheduleAtFixedRate(
+                      getRunnable(false),
+                      defaultReportPeriod,
+                      defaultReportPeriod,
+                      TimeUnit.SECONDS
+                  );
+                  setActive(false);
+                } else {
+                  int delay = (int) Math.pow(2, extendedReportStatsFailedCount - 1);
+                  LOG.warn("Reporting will back off for {} day(s)", delay);
+                  future.cancel(false);
+                  future = executorService.scheduleAtFixedRate(
+                      getRunnable(false),
+                      delay * defaultReportPeriod,
+                      defaultReportPeriod,
+                      TimeUnit.SECONDS
+                  );
+                }
               }
             }
           }
+          saveStats();
         }
-        saveStats();
       }
     };
   }
 
+  private boolean shouldReport(boolean forceNextReport) {
+    if (getStatsInfo().getCollectedStats().isEmpty()) {
+      return false;
+    }
+    if (forceNextReport) {
+      LOG.debug("shouldReport because next report is forced");
+      return true;
+    }
+    long oldestStartTime = getStatsInfo().getCollectedStats().get(0).getStartTime();
+    long delta = System.currentTimeMillis() - oldestStartTime;
+    boolean report = delta > (TimeUnit.SECONDS.toMillis(getReportPeriodSeconds()) * 0.99);
+    LOG.debug("shouldReport returning {} with oldest start time {} delta {}", report, oldestStartTime, delta);
+    return report;
+  }
+
   protected boolean reportStats(List<StatsBean> stats) {
-//    try {
-//      getBundleManager().uploadNewBundleFromInstances(
-//        Collections.singletonList(new StatsGenerator(stats)),
-//        BundleType.STATS
-//      );
-//      return true;
-//    } catch (IOException ex) {
-//      LOG.warn("Reporting failed. Error: {}", ex.getMessage(), ex);
-//      return false;
-//    }
-    return false;
+    boolean reported = false;
+    String getTelemetryUrlEndpoint = config.get(GET_TELEMETRY_URL_ENDPOINT, GET_TELEMETRY_URL_ENDPOINT_DEFAULT);
+    if (isTelemetryEnabled(getTelemetryUrlEndpoint)) {
+      try {
+        // RestClient adds a trailing slash to the "baseUrl", so we have to split it up just to avoid that
+        URL getTelemetryUrl = new URL(getTelemetryUrlEndpoint);
+        String baseUrl = getTelemetryUrlEndpoint.substring(
+            0,
+            getTelemetryUrlEndpoint.length() - getTelemetryUrl.getPath().length());
+        RestClient client = RestClient.builder(baseUrl)
+            .json(true)
+            .name(getRuntimeInfo().getId())
+            .path(getTelemetryUrl.getPath())
+            .build();
+        ImmutableMap.Builder<String, String> argsMapBuilder = ImmutableMap.builder();
+        argsMapBuilder.put(GET_TELEMETRY_URL_ARG_CLIENT_ID, getRuntimeInfo().getId());
+        argsMapBuilder.put(GET_TELEMETRY_URL_ARG_EXTENSION, GET_TELEMETRY_URL_ARG_EXTENSION_JSON);
+        if (config.get(TELEMETRY_USE_TEST_BUCKET, TELEMETRY_USE_TEST_BUCKET_DEFAULT)) {
+          argsMapBuilder.put(GET_TELEMETRY_URL_ARG_TEST_BUCKET, "True"); // any non-empty string is treated as true
+        }
+        RestClient.Response response = postToGetTelemetryUrl(client, argsMapBuilder.build());
+        if (response.successful()) {
+          Map<String, String> responseData = response.getData(new TypeReference<Map<String, String>>(){});
+          String uploadUrlString = responseData.get(TELEMETRY_URL_KEY);
+          if (null != uploadUrlString) {
+            reported = uploadToUrl(stats, uploadUrlString);
+          } else {
+            LOG.warn("Unable to get telemetry URL from endpoint {}, url missing from responseData {}",
+                getTelemetryUrlEndpoint,
+                responseData);
+          }
+        } else {
+          LOG.warn("Unable to get telemetry URL from endpoint {}, response code: {}",
+              getTelemetryUrlEndpoint,
+              response.getStatus());
+        }
+      } catch (Exception ex) {
+        LOG.warn("Usage reporting failed. Error: {}", ex.getMessage(), ex);
+      }
+    } else {
+      LOG.debug("Reporting disabled");
+      reported = true;
+    }
+    return reported;
+  }
+
+  private boolean isTelemetryEnabled(String getTelemetryUrlEndpoint) {
+    if (!getTelemetryUrlEndpoint.startsWith("http")) {
+      // not configured with valid url
+      return false;
+    }
+    if (buildInfo.getVersion().endsWith("-SNAPSHOT") && !config.get(TELEMETRY_FOR_SNAPSHOT_BUILDS, false)) {
+      // don't collect for development builds
+      return false;
+    }
+    return true;
+  }
+
+  // This is mostly here for mocking in tests
+  @VisibleForTesting
+  protected RestClient.Response postToGetTelemetryUrl(RestClient client, Object data) throws IOException {
+    return client.post(data);
+  }
+
+  private boolean uploadToUrl(List<StatsBean> stats, String uploadUrlString) throws IOException {
+    boolean reported = false;
+    LOG.debug("Uploading {} stats to url {}", stats.size(), uploadUrlString);
+    URL uploadUrl = new URL(uploadUrlString);
+    // Avoid RestClient since sometimes extra headers cause a problem with signed URLs
+    HttpURLConnection connection = getHttpURLConnection(uploadUrl);
+    connection.setDoInput(true);
+    connection.setDoOutput(true);
+    connection.setRequestMethod("PUT");
+    OutputStreamWriter out = new OutputStreamWriter(connection.getOutputStream());
+    OBJECT_MAPPER.writeValue(out, stats);
+    out.close();
+    int responseCode = connection.getResponseCode();
+    if (responseCode == HttpURLConnection.HTTP_OK) {
+      reported = true;
+    } else {
+      LOG.warn("Failed to upload to url {} with code {} and message: {} and stream: {}",
+          uploadUrlString,
+          responseCode,
+          connection.getResponseMessage(),
+          IOUtils.toString(connection.getInputStream()));
+      connection.getInputStream().close();
+    }
+    return reported;
+  }
+
+  // This is just so it can be mocked
+  @VisibleForTesting
+  protected HttpURLConnection getHttpURLConnection(URL uploadUrl) throws IOException {
+    return (HttpURLConnection) uploadUrl.openConnection();
   }
 
   protected void saveStats() {
@@ -313,11 +463,11 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
 
   @Override
   protected void stopTask() {
-//    if (getFuture() != null) {
-//      getFuture().cancel(false);
-//    }
-//    getStatsInfo().stopSystem();
-//    getRunnable().run();
+    if (getFuture() != null) {
+      getFuture().cancel(false);
+    }
+    getStatsInfo().stopSystem();
+    getRunnable(true).run();
     super.stopTask();
   }
 
@@ -348,8 +498,24 @@ public class StatsCollectorTask extends AbstractTask implements StatsCollector {
         LOG.warn("Could not change stats collection state, Disabling and re-opting. Error: {}", ex.getMessage(), ex);
       }
       getStatsInfo().reset();
-      saveStats();
+      if (active) {
+        // Active flag changed to active, trigger roll and report
+        // This internally save stats as well
+        getRunnable(true).run();
+      } else {
+        saveStats();
+      }
     }
+  }
+
+  @Override
+  public void createPipeline(String pipelineId) {
+    getStatsInfo().createPipeline(pipelineId);
+  }
+
+  @Override
+  public void previewPipeline(String pipelineId) {
+    getStatsInfo().previewPipeline(pipelineId);
   }
 
   @Override

@@ -23,12 +23,12 @@
   <parent>
     <groupId>com.streamsets</groupId>
     <artifactId>streamsets-datacollector-root-proto</artifactId>
-    <version>3.15.0-SNAPSHOT</version>
+    <version>3.16.0-SNAPSHOT</version>
     <relativePath>../root-proto</relativePath>
   </parent>
   <groupId>com.streamsets</groupId>
   <artifactId>streamsets-datacollector-root</artifactId>
-  <version>3.15.0-SNAPSHOT</version>
+  <version>3.16.0-SNAPSHOT</version>
   <description>StreamSets Data Collector Root POM</description>
   <name>StreamSets Data Collector Root POM</name>
   <packaging>pom</packaging>
@@ -332,11 +332,6 @@
       </dependency>
       <dependency>
         <groupId>com.streamsets</groupId>
-        <artifactId>streamsets-datacollector-mapr_5_0-lib</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.streamsets</groupId>
         <artifactId>streamsets-datacollector-apache-kudu_1_0-lib</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -530,16 +525,6 @@
       <dependency>
         <groupId>com.streamsets</groupId>
         <artifactId>streamsets-datacollector-cdh-spark_2_3-lib</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.streamsets</groupId>
-        <artifactId>streamsets-datacollector-mapr_5_1-lib</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.streamsets</groupId>
-        <artifactId>streamsets-datacollector-mapr_5_2-lib</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -818,6 +803,12 @@
         <groupId>fr.xebia.extras</groupId>
         <artifactId>selma</artifactId>
         <version>${selma.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>com.amazonaws</groupId>
+        <artifactId>aws-java-sdk-s3</artifactId>
+        <version>${aws.sdk.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

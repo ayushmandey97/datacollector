@@ -16,6 +16,7 @@
 package com.streamsets.datacollector.io;
 
 
+import com.google.common.collect.ImmutableSet;
 import org.apache.commons.io.IOUtils;
 import org.junit.Assert;
 import org.junit.Test;
@@ -26,6 +27,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Set;
 import java.util.UUID;
 
 public class TestDataStore {
@@ -192,6 +197,7 @@ public class TestDataStore {
     } finally {
       ds.close();
     }
+    Assert.assertTrue(ds.isRecovered());
   }
 
   @Test
@@ -207,6 +213,7 @@ public class TestDataStore {
     } finally {
       ds.close();
     }
+    Assert.assertTrue(ds.isRecovered());
   }
 
   @Test
@@ -224,6 +231,7 @@ public class TestDataStore {
     } finally {
       ds.close();
     }
+    Assert.assertTrue(ds.isRecovered());
   }
 
   @Test
@@ -241,6 +249,7 @@ public class TestDataStore {
     } finally {
       ds.close();
     }
+    Assert.assertTrue(ds.isRecovered());
   }
 
   @Test(expected = IOException.class)
@@ -254,6 +263,7 @@ public class TestDataStore {
       readViaStore(ds);
     } finally {
       ds.close();
+      Assert.assertFalse(ds.isRecovered());
     }
   }
 
@@ -268,6 +278,7 @@ public class TestDataStore {
       readViaStore(ds);
     } finally {
       ds.close();
+      Assert.assertFalse(ds.isRecovered());
     }
   }
 
@@ -281,6 +292,7 @@ public class TestDataStore {
       readViaStore(ds);
     } finally {
       ds.close();
+      Assert.assertFalse(ds.isRecovered());
     }
   }
 
@@ -296,6 +308,7 @@ public class TestDataStore {
       readViaStore(ds);
     } finally {
       ds.close();
+      Assert.assertFalse(ds.isRecovered());
     }
   }
 
@@ -314,6 +327,45 @@ public class TestDataStore {
     }
     Assert.assertTrue(Files.exists(file.getAbsoluteFile().toPath()));
     Assert.assertTrue(!Files.exists(oldFile.getAbsoluteFile().toPath()));
+    Assert.assertFalse(ds.isRecovered());
+  }
+
+  @Test
+  public void testDefaultPermission() throws IOException {
+    File file = new File(createTestDir(), "x");
+    DataStore ds = new DataStore(file);
+    try {
+      OutputStream outputStream = ds.getOutputStream();
+      ds.commit(outputStream);
+      ds.release();
+    } finally {
+      ds.close();
+    }
+    Set<PosixFilePermission> perms = Files.getPosixFilePermissions(file.toPath());
+    Assert.assertEquals(ImmutableSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE), perms);
+  }
+
+  @Test
+  public void testExistingPermission() throws IOException {
+    File file = new File(createTestDir(), "x");
+    Set<PosixFilePermission> perms = ImmutableSet.of(
+        PosixFilePermission.OWNER_READ,
+        PosixFilePermission.OWNER_WRITE,
+        PosixFilePermission.GROUP_READ
+    );
+    FileAttribute attribute = PosixFilePermissions.asFileAttribute(perms);
+    Files.createFile(file.toPath(), attribute);
+
+    DataStore ds = new DataStore(file);
+    try {
+      OutputStream outputStream = ds.getOutputStream();
+      ds.commit(outputStream);
+      ds.release();
+    } finally {
+      ds.close();
+    }
+    Set<PosixFilePermission> gotPerms = Files.getPosixFilePermissions(file.toPath());
+    Assert.assertEquals(perms, gotPerms);
   }
 
 }

@@ -46,6 +46,8 @@ angular
           ).then(
             function(res) {
               $modalInstance.close(res.data);
+              mixpanel.people.set({'Core Journey Stage - Pipeline Created': true});
+              mixpanel.track('New Pipeline Created', {'Pipeline ID': res.data.pipelineId});
             },
             function(res) {
               $scope.common.errors = [res.data];
@@ -62,7 +64,7 @@ angular
       },
 
       refreshResults : function ($select){
-        let search = $select.search,
+        var search = $select.search,
           list = angular.copy($scope.pipelineLabels);
         //remove last user input
         list = list.filter(function(item) {

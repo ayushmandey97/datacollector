@@ -24,7 +24,7 @@ public enum Groups implements Label {
   TABLE("CDC"),
   CREDENTIALS("Credentials"),
   LEGACY("Legacy"),
-  ADVANCED("Advanced")
+  ADVANCED("Advanced"),
   ;
 
   private final String label;

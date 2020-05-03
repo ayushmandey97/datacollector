@@ -28,6 +28,11 @@ class TestStartJobProcessorBuilder {
     conf.jobIdConfigList = new ArrayList<>();
   }
 
+  TestStartJobProcessorBuilder taskName(String taskName) {
+    conf.taskName = taskName;
+    return this;
+  }
+
   TestStartJobProcessorBuilder baseUrl(String baseUrl) {
     conf.baseUrl = baseUrl;
     return this;

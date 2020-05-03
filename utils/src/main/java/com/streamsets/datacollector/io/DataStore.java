@@ -16,6 +16,7 @@
 package com.streamsets.datacollector.io;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import com.streamsets.pipeline.api.impl.Utils;
 import org.apache.commons.io.input.ProxyInputStream;
 import org.apache.commons.io.output.ProxyOutputStream;
@@ -31,6 +32,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
@@ -46,6 +50,7 @@ public class DataStore {
   private Closeable stream;
   private boolean forWrite;
   private boolean isClosed;
+  private boolean isRecovered;
 
   /**
    * Lock with counter so that we know how many threads are using the lock.
@@ -93,6 +98,10 @@ public class DataStore {
 
   public File getFile() {
     return file.toFile();
+  }
+
+  public boolean isRecovered() {
+    return isRecovered;
   }
 
   public void close() throws IOException {
@@ -227,6 +236,10 @@ public class DataStore {
     }
   }
 
+  private final static FileAttribute DEFAULT_PERMISSIONS = PosixFilePermissions.asFileAttribute(
+    ImmutableSet.of(PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_READ)
+  );
+
   /**
    * Returns an output stream for the requested file.
    *
@@ -255,10 +268,13 @@ public class DataStore {
       forWrite = true;
       LOG.trace("Starts write '{}'", file);
       verifyAndRecover();
+      FileAttribute permissions = DEFAULT_PERMISSIONS;
       if (Files.exists(file)) {
+        permissions = PosixFilePermissions.asFileAttribute(Files.getPosixFilePermissions(file));
         Files.move(file, fileOld);
         LOG.trace("Starting write, move '{}' to '{}'", file, fileOld);
       }
+      Files.createFile(fileTmp, permissions);
       OutputStream os = new ProxyOutputStream(new FileOutputStream(fileTmp.toFile())) {
         @Override
         public void close() throws IOException {
@@ -314,6 +330,7 @@ public class DataStore {
       Files.delete(fileOld);
       LOG.trace("Committing write, deleting '{}'", fileOld);
     }
+    isRecovered = false;
     LOG.trace("Committed");
   }
 
@@ -332,6 +349,7 @@ public class DataStore {
           Files.delete(fileOld);
           LOG.warn("File '{}', deleted during verification", fileOld);
         }
+        isRecovered = true;
         LOG.warn("File '{}', committed during verification", file);
       } else if (Files.exists(fileTmp)) {
         LOG.warn("File '{}', write incomplete while writing, rolling back", file);
@@ -344,6 +362,7 @@ public class DataStore {
         Files.delete(fileTmp);
         Files.move(fileOld, file);
         LOG.warn("File '{}', rolled back during verification", file);
+        isRecovered = true;
       } else if (Files.exists(fileOld)) {
         if (Files.exists(file)) {
           LOG.warn("Both file {} and old file '{}' exists, deleting old file during verification", file, fileOld);
@@ -351,6 +370,7 @@ public class DataStore {
         } else {
           Files.move(fileOld, file);
           LOG.warn("File '{}', rolled back during verification", file);
+          isRecovered = true;
         }
       }
     } else {

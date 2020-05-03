@@ -19,14 +19,18 @@ import com.streamsets.pipeline.api.Field;
 import com.streamsets.pipeline.api.OnRecordError;
 import com.streamsets.pipeline.api.Processor;
 import com.streamsets.pipeline.api.Record;
+import com.streamsets.pipeline.api.StageBehaviorFlags;
+import com.streamsets.pipeline.api.StageDef;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.sdk.RecordCreator;
 import com.streamsets.pipeline.stage.processor.scripting.ProcessingMode;
 import com.streamsets.pipeline.stage.processor.scripting.ScriptingProcessorTestUtil;
 import com.streamsets.pipeline.stage.util.scripting.config.ScriptRecordType;
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -595,5 +599,31 @@ public class TestJythonProcessor {
         JythonDProcessor.class,
         processor
     );
+  }
+
+  @Test
+  public void testUserCodeInjectionFlag() {
+    Assert.assertArrayEquals(
+        "This stage should _only_ have the USER_CODE_INJECTION flag set",
+        new StageBehaviorFlags[]{StageBehaviorFlags.USER_CODE_INJECTION},
+        JythonDProcessor.class.getAnnotation(StageDef.class).flags()
+    );
+  }
+
+  @Test
+  public void testNativeNullRootField() {
+    String script = "for record in sdc.records:\n" +
+        "  record.value = None\n" +
+        "  sdc.output.write(record)\n";
+
+    Processor processor = new JythonProcessor(
+      ProcessingMode.RECORD,
+      script,
+      "",
+      "",
+      ScriptRecordType.NATIVE_OBJECTS,
+      Collections.emptyMap()
+    );
+    ScriptingProcessorTestUtil.verifyNativeNullRootValue(JythonDProcessor.class, processor);
   }
 }

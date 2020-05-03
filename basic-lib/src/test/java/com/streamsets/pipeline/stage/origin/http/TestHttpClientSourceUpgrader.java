@@ -426,6 +426,32 @@ public class TestHttpClientSourceUpgrader {
     UpgraderTestUtils.assertExists(configs, dataFormatPrefix + "preserveRootElement", false);
   }
 
+  @Test
+  public void testV15ToV16() {
+    Mockito.doReturn(15).when(context).getFromVersion();
+    Mockito.doReturn(16).when(context).getToVersion();
+
+    String dataFormatPrefix = "conf.client.";
+    configs.add(new Config(dataFormatPrefix + "connectTimeoutMillis", 0));
+    configs.add(new Config(dataFormatPrefix + "readTimeoutMillis", 0));
+    configs = upgrader.upgrade(configs, context);
+
+    UpgraderTestUtils.assertExists(configs, dataFormatPrefix + "connectTimeoutMillis", 250000);
+    UpgraderTestUtils.assertExists(configs, dataFormatPrefix + "readTimeoutMillis", 30000);
+  }
+
+  @Test
+  public void testV16ToV17() {
+    Mockito.doReturn(16).when(context).getFromVersion();
+    Mockito.doReturn(17).when(context).getToVersion();
+
+    String dataFormatPrefix = "conf.";
+    configs = upgrader.upgrade(configs, context);
+
+    UpgraderTestUtils.assertExists(configs, dataFormatPrefix + "propagateAllHttpResponses", false);
+    UpgraderTestUtils.assertExists(configs, dataFormatPrefix + "errorResponseField", "outErrorBody");
+  }
+
   private static Map<String, Object> getConfigsAsMap(List<Config> configs) {
     HashMap<String, Object> map = new HashMap<>();
     for (Config c : configs) {

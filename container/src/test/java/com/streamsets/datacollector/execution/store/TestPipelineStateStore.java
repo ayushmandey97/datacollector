@@ -19,6 +19,7 @@ import com.codahale.metrics.MetricRegistry;
 import com.google.common.collect.ImmutableList;
 import com.streamsets.datacollector.config.PipelineConfiguration;
 import com.streamsets.datacollector.event.handler.remote.RemoteDataCollector;
+import com.streamsets.datacollector.execution.EventListenerManager;
 import com.streamsets.datacollector.execution.PipelineState;
 import com.streamsets.datacollector.execution.PipelineStateStore;
 import com.streamsets.datacollector.execution.PipelineStatus;
@@ -35,6 +36,7 @@ import com.streamsets.datacollector.util.LockCache;
 import com.streamsets.datacollector.util.LockCacheModule;
 import com.streamsets.datacollector.util.PipelineDirectoryUtil;
 import com.streamsets.datacollector.util.TestUtil;
+import com.streamsets.datacollector.util.credential.PipelineCredentialHandler;
 import com.streamsets.pipeline.api.ExecutionMode;
 import dagger.Module;
 import dagger.ObjectGraph;
@@ -45,6 +47,7 @@ import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.mockito.Mockito;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -117,6 +120,12 @@ public class TestPipelineStateStore {
       return new Configuration();
     }
 
+    @Provides
+    @Singleton
+    public EventListenerManager provideEventListenerManager() {
+      return Mockito.spy(new EventListenerManager());
+    }
+
     @Provides @Singleton
     public PipelineStateStore providePipelineStateStore(SlaveRuntimeInfo runtimeInfo, Configuration configuration) {
       return new MockFilePipelineStateStore(new FilePipelineStateStore(runtimeInfo, configuration), configuration);
@@ -128,9 +137,17 @@ public class TestPipelineStateStore {
         SlaveRuntimeInfo slaveRuntimeInfo,
         StageLibraryTask stageLibraryTask,
         PipelineStateStore pipelineStateStore,
+        EventListenerManager eventListenerManager,
         LockCache<String> lockCache
     ) {
-      return new FilePipelineStoreTask(slaveRuntimeInfo, stageLibraryTask, pipelineStateStore, lockCache);
+      return new FilePipelineStoreTask(
+          slaveRuntimeInfo,
+          stageLibraryTask,
+          pipelineStateStore,
+          eventListenerManager,
+          lockCache,
+          Mockito.mock(PipelineCredentialHandler.class)
+      );
     }
   }
 
@@ -179,7 +196,7 @@ public class TestPipelineStateStore {
 
     PipelineConfiguration pc0 = pipelineStoreTask.load("name1", "0");
     pc0 = createPipeline(pc0.getUuid());
-    pipelineStoreTask.save("user3", "name1", "0", "execution mdoe changed", pc0);
+    pipelineStoreTask.save("user3", "name1", "0", "execution mdoe changed", pc0, false);
     pipelineState = pipelineStateStore.getState("name1", "0");
     assertEquals("user3", pipelineState.getUser());
     assertEquals("name1", pipelineState.getPipelineId());
@@ -188,7 +205,7 @@ public class TestPipelineStateStore {
 
     pc0 = pipelineStoreTask.load("name1", "0");
     pc0 = createPipeline(pc0.getUuid());
-    pipelineStoreTask.save("user4", "name1", "0", "execution mdoe same", pc0);
+    pipelineStoreTask.save("user4", "name1", "0", "execution mdoe same", pc0, false);
     pipelineState = pipelineStateStore.getState("name1", "0");
     // should still be user3 as we dont persist state file on each edit (unless the execution mode has changed)
     assertEquals("user3", pipelineState.getUser());

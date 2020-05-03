@@ -15,18 +15,22 @@
  */
 package com.streamsets.datacollector.usagestats;
 
+import com.google.common.collect.ImmutableMap;
 import com.streamsets.datacollector.config.PipelineConfiguration;
 import com.streamsets.datacollector.main.BuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;
+import org.mockito.internal.util.reflection.Whitebox;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class TestStatsInfo {
+
+  SysInfo sysInfo = Mockito.mock(SysInfo.class);
 
   @Test
   public void testGetters() {
@@ -115,9 +119,8 @@ public class TestStatsInfo {
   public void testRollIfNeededNoExistingStats() {
     BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
     Mockito.when(buildInfo.getVersion()).thenReturn("v1");
-    RuntimeInfo runtimeInfo = Mockito.mock(RuntimeInfo.class);
-    
-    Mockito.when(runtimeInfo.isDPMEnabled()).thenReturn(true);
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id", true);
 
     StatsInfo si = new StatsInfo();
     si = Mockito.spy(si);
@@ -125,7 +128,7 @@ public class TestStatsInfo {
     si.startSystem();
     Assert.assertEquals(1, si.getActiveStats().getUpTime().getMultiplier());
 
-    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, 1000));
+    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo,1000, false));
     Mockito.verify(si, Mockito.times(1)).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
 
     Assert.assertEquals("v1", si.getActiveStats().getDataCollectorVersion());
@@ -135,20 +138,58 @@ public class TestStatsInfo {
     Assert.assertEquals(1, si.getActiveStats().getUpTime().getMultiplier());
   }
 
+  private RuntimeInfo mockRuntimeInfo(String sdcId, boolean dpmEnabled) {
+    RuntimeInfo ret = Mockito.mock(RuntimeInfo.class);
+    Mockito.when(ret.getId()).thenReturn(sdcId);
+    Mockito.when(ret.getProductName()).thenReturn(RuntimeInfo.SDC_PRODUCT);
+    Mockito.when(ret.isDPMEnabled()).thenReturn(dpmEnabled);
+    return ret;
+  }
+
+  @Test
+  public void testRollIfNeededSdcIdChange() {
+    BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
+    Mockito.when(buildInfo.getVersion()).thenReturn("v1");
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id2", false);
+
+    StatsInfo si = new StatsInfo();
+    si = Mockito.spy(si);
+    Mockito.doReturn(ImmutableMap.of("a", "A")).when(si).getExtraInfo(sysInfo);
+
+    si.getActiveStats().setSdcId("id1");
+    si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
+    si.getActiveStats().setDataCollectorVersion("v0");
+    si.getActiveStats().setBuildRepoSha("sha1");
+    si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
+    si.getActiveStats().setStartTime(System.currentTimeMillis());
+
+    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 10000, false));
+    Mockito.verify(si, Mockito.times(1)).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
+
+    Assert.assertEquals("id2", si.getActiveStats().getSdcId());
+    Assert.assertEquals(1, si.getCollectedStats().size());
+  }
+
   @Test
   public void testRollIfNeededVersionChange() {
     BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
     Mockito.when(buildInfo.getVersion()).thenReturn("v1");
-    RuntimeInfo runtimeInfo = Mockito.mock(RuntimeInfo.class);
-    
-    Mockito.when(runtimeInfo.isDPMEnabled()).thenReturn(false);
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id", false);
 
     StatsInfo si = new StatsInfo();
     si = Mockito.spy(si);
+    Mockito.doReturn(ImmutableMap.of("a", "A")).when(si).getExtraInfo(sysInfo);
+
+    si.getActiveStats().setSdcId("id");
+    si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
     si.getActiveStats().setDataCollectorVersion("v0");
+    si.getActiveStats().setBuildRepoSha("sha1");
+    si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
     si.getActiveStats().setStartTime(System.currentTimeMillis());
 
-    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, 10000));
+    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 10000, false));
     Mockito.verify(si, Mockito.times(1)).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
 
     Assert.assertEquals("v1", si.getActiveStats().getDataCollectorVersion());
@@ -156,20 +197,75 @@ public class TestStatsInfo {
   }
 
   @Test
-  public void testRollIfNeededDpmEnabledChange() {
+  public void testRollIfNeededBuildRepoShaChange() {
     BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
     Mockito.when(buildInfo.getVersion()).thenReturn("v1");
-    RuntimeInfo runtimeInfo = Mockito.mock(RuntimeInfo.class);
-    
-    Mockito.when(runtimeInfo.isDPMEnabled()).thenReturn(true);
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id", false);
 
     StatsInfo si = new StatsInfo();
     si = Mockito.spy(si);
+    Mockito.doReturn(ImmutableMap.of("a", "A")).when(si).getExtraInfo(sysInfo);
+
+    si.getActiveStats().setSdcId("id");
+    si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
     si.getActiveStats().setDataCollectorVersion("v1");
+    si.getActiveStats().setBuildRepoSha("sha2");
+    si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
+    si.getActiveStats().setStartTime(System.currentTimeMillis());
+
+    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 10000, false));
+    Mockito.verify(si, Mockito.times(1)).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
+
+    Assert.assertEquals("sha1", si.getActiveStats().getBuildRepoSha());
+    Assert.assertEquals(1, si.getCollectedStats().size());
+  }
+
+  @Test
+  public void testNoRollIfExtraInfoChange() {
+    BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
+    Mockito.when(buildInfo.getVersion()).thenReturn("v1");
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id", false);
+
+    StatsInfo si = new StatsInfo();
+    si = Mockito.spy(si);
+    Mockito.doReturn(ImmutableMap.of("a", "B")).when(si).getExtraInfo(sysInfo);
+
+    si.getActiveStats().setSdcId("id");
+    si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
+    si.getActiveStats().setDataCollectorVersion("v1");
+    si.getActiveStats().setBuildRepoSha("sha1");
+    si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
+    si.getActiveStats().setStartTime(System.currentTimeMillis());
+
+    Assert.assertFalse(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 10000, false));
+    Mockito.verify(si, Mockito.never()).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
+
+    Assert.assertEquals("sha1", si.getActiveStats().getBuildRepoSha());
+    Assert.assertEquals(0, si.getCollectedStats().size());
+  }
+
+  @Test
+  public void testRollIfNeededDpmEnabledChange() {
+    BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
+    Mockito.when(buildInfo.getVersion()).thenReturn("v1");
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id", true);
+
+    StatsInfo si = new StatsInfo();
+    si = Mockito.spy(si);
+    Mockito.doReturn(ImmutableMap.of("a", "A")).when(si).getExtraInfo(sysInfo);
+
+    si.getActiveStats().setSdcId("id");
+    si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
+    si.getActiveStats().setDataCollectorVersion("v1");
+    si.getActiveStats().setBuildRepoSha("sha1");
+    si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
     si.getActiveStats().setStartTime(System.currentTimeMillis());
     si.getActiveStats().setDpmEnabled(false);
 
-    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, 10000));
+    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 10000, false));
     Mockito.verify(si, Mockito.times(1)).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
 
     Assert.assertEquals("v1", si.getActiveStats().getDataCollectorVersion());
@@ -181,17 +277,48 @@ public class TestStatsInfo {
   public void testRollIfNeededRollFrequencyPassed() {
     BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
     Mockito.when(buildInfo.getVersion()).thenReturn("v1");
-    RuntimeInfo runtimeInfo = Mockito.mock(RuntimeInfo.class);
-    
-    Mockito.when(runtimeInfo.isDPMEnabled()).thenReturn(false);
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id", false);
 
     StatsInfo si = new StatsInfo();
     si = Mockito.spy(si);
+    Mockito.doReturn(ImmutableMap.of("a", "A")).when(si).getExtraInfo(sysInfo);
+
+    si.getActiveStats().setSdcId("id");
+    si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
     si.getActiveStats().setDataCollectorVersion("v1");
+    si.getActiveStats().setBuildRepoSha("sha1");
+    si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
     si.getActiveStats().setStartTime(System.currentTimeMillis() - 2);
     si.getActiveStats().setDpmEnabled(false);
 
-    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, 1));
+    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 1, false));
+    Mockito.verify(si, Mockito.times(1)).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
+
+    Assert.assertEquals("v1", si.getActiveStats().getDataCollectorVersion());
+    Assert.assertEquals(1, si.getCollectedStats().size());
+  }
+
+  @Test
+  public void testRollIfNeededRollForcedRoll() {
+    BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
+    Mockito.when(buildInfo.getVersion()).thenReturn("v1");
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id", false);
+
+    StatsInfo si = new StatsInfo();
+    si = Mockito.spy(si);
+    Mockito.doReturn(ImmutableMap.of("a", "A")).when(si).getExtraInfo(sysInfo);
+
+    si.getActiveStats().setSdcId("id");
+    si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
+    si.getActiveStats().setDataCollectorVersion("v1");
+    si.getActiveStats().setBuildRepoSha("sha1");
+    si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
+    si.getActiveStats().setStartTime(System.currentTimeMillis());
+    si.getActiveStats().setDpmEnabled(false);
+
+    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 1, true));
     Mockito.verify(si, Mockito.times(1)).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
 
     Assert.assertEquals("v1", si.getActiveStats().getDataCollectorVersion());
@@ -202,18 +329,23 @@ public class TestStatsInfo {
   public void testRollIfNeededRollNoRoll() {
     BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
     Mockito.when(buildInfo.getVersion()).thenReturn("v1");
-    RuntimeInfo runtimeInfo = Mockito.mock(RuntimeInfo.class);
-    
-    Mockito.when(runtimeInfo.isDPMEnabled()).thenReturn(false);
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id", false);
 
     StatsInfo si = new StatsInfo();
     si = Mockito.spy(si);
+    Mockito.doReturn(ImmutableMap.of("a", "A")).when(si).getExtraInfo(sysInfo);
+
+    si.getActiveStats().setSdcId("id");
+    si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
     si.getActiveStats().setDataCollectorVersion("v1");
+    si.getActiveStats().setBuildRepoSha("sha1");
+    si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
     si.getActiveStats().setStartTime(System.currentTimeMillis());
     si.getActiveStats().setDpmEnabled(false);
     ActiveStats as = si.getActiveStats();
 
-    Assert.assertFalse(si.rollIfNeeded(buildInfo, runtimeInfo, 1000));
+    Assert.assertFalse(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 1000, false));
     Mockito.verify(si, Mockito.never()).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
     Assert.assertEquals(as, si.getActiveStats());
   }
@@ -222,27 +354,64 @@ public class TestStatsInfo {
   public void testRollIfNeededRollDiscardOldestCollectedStats() {
     BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
     Mockito.when(buildInfo.getVersion()).thenReturn("v1");
-    RuntimeInfo runtimeInfo = Mockito.mock(RuntimeInfo.class);
-    
-    Mockito.when(runtimeInfo.isDPMEnabled()).thenReturn(false);
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id", false);
 
     StatsInfo si = new StatsInfo();
     si = Mockito.spy(si);
+    Mockito.doReturn(ImmutableMap.of("a", "A")).when(si).getExtraInfo(sysInfo);
+
+    si.getActiveStats().setSdcId("id");
+    si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
     si.getActiveStats().setDataCollectorVersion("v1");
+    si.getActiveStats().setBuildRepoSha("sha1");
+    si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
     si.getActiveStats().setStartTime(System.currentTimeMillis() - 2);
     si.getActiveStats().setDpmEnabled(false);
     ActiveStats as = si.getActiveStats();
     List<StatsBean> collected = new ArrayList<>();
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < StatsInfo.INTERVALS_TO_KEEP; i++) {
       collected.add(new StatsBean());
     }
     si.setCollectedStats(collected);
-    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, 1));
+    Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 1, false));
     List<StatsBean> got = si.getCollectedStats();
 
     collected.remove(0);
-    got.remove(9);
+    got.remove(StatsInfo.INTERVALS_TO_KEEP - 1);
     Assert.assertEquals(collected, got);
   }
+
+  @Test
+  public void testRollIfNeededSystemInfoVariablesNull() {
+    BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
+    Mockito.when(buildInfo.getVersion()).thenReturn("v1");
+    Mockito.when(buildInfo.getBuiltRepoSha()).thenReturn("sha1");
+    RuntimeInfo runtimeInfo = mockRuntimeInfo("id2", false);
+
+    for (String fieldToNull : ImmutableList.of("sdcId", "buildRepoSha")) {
+      StatsInfo si = new StatsInfo();
+      si = Mockito.spy(si);
+      Mockito.doReturn(ImmutableMap.of("a", "A")).when(si).getExtraInfo(sysInfo);
+
+      si.getActiveStats().setSdcId("id2");
+      si.getActiveStats().setProductName(RuntimeInfo.SDC_PRODUCT);
+      si.getActiveStats().setDataCollectorVersion("v1");
+      si.getActiveStats().setBuildRepoSha("sha1");
+      si.getActiveStats().setExtraInfo(ImmutableMap.of("a", "A"));
+      si.getActiveStats().setStartTime(System.currentTimeMillis());
+
+      Whitebox.setInternalState(si.getActiveStats(), fieldToNull, null);
+      Assert.assertTrue(si.rollIfNeeded(buildInfo, runtimeInfo, sysInfo, 10000, false));
+      Mockito.verify(si, Mockito.times(1)).doWithLock(Mockito.any(Runnable.class), Mockito.eq(true));
+
+      Assert.assertEquals("id2", si.getActiveStats().getSdcId());
+      Assert.assertEquals("sha1", si.getActiveStats().getBuildRepoSha());
+      Assert.assertEquals("v1", si.getActiveStats().getDataCollectorVersion());
+      Assert.assertEquals(ImmutableMap.of("a", "A"), si.getActiveStats().getExtraInfo());
+      Assert.assertEquals(1, si.getCollectedStats().size());
+    }
+  }
+
 
 }
